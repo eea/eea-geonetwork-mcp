@@ -49,7 +49,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "eea-sdi-catalogue": {
       "command": "node",
-      "args": ["C:\\Users\\dubos\\_Projects\\EEA_SDI_MCP\\dist\\index.js"]
+      "args": ["C:\\Users\\dubos\\_Projects\\EEA_sdi_mcp\\dist\\index.js"]
     }
   }
 }

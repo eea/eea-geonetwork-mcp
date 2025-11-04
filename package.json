@@ -1,5 +1,5 @@
 {
-  "name": "eea-sdi-mcp-server",
+  "name": "eea_sdi_mcp",
   "version": "1.0.0",
   "description": "MCP server for EEA SDI Catalogue API (GeoNetwork 4.4.9)",
   "type": "module",

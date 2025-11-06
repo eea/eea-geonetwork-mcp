@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an MCP (Model Context Protocol) server that provides tools to interact with the EEA SDI Catalogue API (GeoNetwork 4.4.9). The server exposes 11 tools for searching, retrieving, and exporting geospatial metadata records from the European Environment Agency's Spatial Data Infrastructure catalogue.
+This is an MCP (Model Context Protocol) server that provides tools to interact with the EEA SDI Catalogue API (GeoNetwork 4.4.9). The server exposes 12 tools for searching, retrieving, duplicating, and exporting geospatial metadata records from the European Environment Agency's Spatial Data Infrastructure catalogue.
 
 ## Development Commands
 
@@ -13,24 +13,53 @@ This is an MCP (Model Context Protocol) server that provides tools to interact w
 npm install          # Install dependencies
 npm run build        # Compile TypeScript to dist/
 npm run dev          # Watch mode (recompile on changes)
-npm start            # Run the compiled server
+npm start            # Run the Streamable HTTP MCP server (port 3001)
 ```
 
-### Testing the Server
-To test the MCP server locally, you can:
-1. Build the project with `npm run build`
-2. Add the server to Claude Desktop configuration (see README.md)
-3. Restart Claude Desktop to load the server
+### Development Workflow
+For active development, run two commands in separate terminals:
+- **Terminal 1**: `npm run dev` - Compile TypeScript in watch mode
+- **Terminal 2**: `npm start` - Run the server
+
+### Server Implementation
+
+The server uses the official MCP protocol via Streamable HTTP transport (standard MCP HTTP/SSE):
+
+**Streamable HTTP MCP Server** (src/index.ts) - Official MCP protocol via Streamable HTTP
+- Runs on port 3001 by default (configurable via `PORT` environment variable or `.env` file)
+- Connect MCP clients to: `http://localhost:3001/`
+- Uses stateless mode (no session management required)
+- Endpoints:
+  - `POST /` - Standard MCP message endpoint (handles JSON-RPC messages)
+  - `GET /` - Optional SSE stream endpoint (for server-initiated messages)
+  - `GET /health` - Health check
 
 ## Architecture
 
 ### Core Components
 
-**src/index.ts** - Single-file MCP server implementation containing:
+**src/index.ts** - Streamable HTTP MCP server implementation:
 - `EEACatalogueServer` class: Main server logic
-- Tool definitions: 11 tools for interacting with the EEA API
-- Request handlers: ListTools and CallTool handlers
-- API client: Axios instance configured for the EEA catalogue
+- `CONFIG` constant: Centralized configuration (BASE_URL, PORT, TIMEOUT)
+- Streamable HTTP transport for MCP protocol (stateless mode)
+- Express server setup with CORS and JSON middleware
+- MCP request handlers: ListTools and CallTool
+- Tool routing via object-based handler lookup (no switch statements)
+- Centralized error handling with formatted error messages
+
+**src/tools.ts** - Tool definitions:
+- Array of 12 tool definitions with JSON schemas
+- Each tool specifies name, description, and input schema
+
+**src/handlers.ts** - Tool implementation handlers:
+- `ToolHandlers` class with Axios instance
+- `formatResponse()` helper for consistent response formatting
+- 12 async handler methods with explicit return types
+- Simplified parameter building using object spread with conditionals
+
+**src/types.ts** - TypeScript interfaces:
+- `ToolResponse` interface for handler return values
+- Argument interfaces for all 12 tools (SearchRecordsArgs, GetRecordArgs, etc.)
 
 ### API Integration
 
@@ -44,7 +73,7 @@ The server uses axios to communicate with the GeoNetwork REST API. All requests:
 ### Tool Categories
 
 1. **Search Tools**: `search_records`, `search_by_extent`
-2. **Record Tools**: `get_record`, `get_related_records`, `get_record_formatters`, `export_record`
+2. **Record Tools**: `get_record`, `get_related_records`, `get_record_formatters`, `export_record`, `duplicate_record`
 3. **Catalogue Tools**: `get_site_info`, `get_sources`, `list_groups`, `get_tags`, `get_regions`
 
 ### Error Handling
@@ -93,18 +122,46 @@ Records can be exported in multiple formats:
 
 To add a new tool:
 
-1. Add tool definition to `getTools()` array with name, description, and inputSchema
-2. Add case to switch statement in `handleToolCall()`
-3. Implement handler method following the pattern:
+1. **Define the tool arguments interface** in `src/types.ts`:
 ```typescript
-private async myNewTool(args: any) {
+export interface MyNewToolArgs {
+  param1: string;
+  param2?: number;
+}
+```
+
+2. **Add tool definition** to the `tools` array in `src/tools.ts`:
+```typescript
+{
+  name: "my_new_tool",
+  description: "Description of what the tool does",
+  inputSchema: {
+    type: "object",
+    properties: {
+      param1: { type: "string", description: "Parameter description" },
+      param2: { type: "number", description: "Optional parameter" }
+    },
+    required: ["param1"]
+  }
+}
+```
+
+3. **Implement the handler method** in `src/handlers.ts` (ToolHandlers class):
+```typescript
+async myNewTool(args: MyNewToolArgs): Promise<ToolResponse> {
   const response = await this.axiosInstance.get("/endpoint", {
     params: args
   });
-  return {
-    content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }]
-  };
+  return this.formatResponse(response.data);
 }
+```
+
+4. **Add the handler to the routing** in `src/index.ts` (handleToolCall method):
+```typescript
+const toolHandlers: Record<string, () => Promise<any>> = {
+  // ... existing handlers
+  my_new_tool: () => this.handlers.myNewTool(args),
+};
 ```
 
 ## API Endpoint Patterns
@@ -114,12 +171,51 @@ Common GeoNetwork endpoints used:
 - `/records/{uuid}` - Get record details
 - `/records/{uuid}/formatters` - List export formats
 - `/records/{uuid}/formatters/{formatter}` - Export record
+- `/records/duplicate` - Duplicate a metadata record
 - `/related/{uuid}` - Get related records
 - `/groups` - List groups
 - `/sources` - List catalogue sources
 - `/tags` - List tags
 - `/regions` - List geographic regions
 - `/site` - Site configuration
+
+## MCP Transport
+
+The server uses the official MCP SDK with **Streamable HTTP** transport (MCP specification 2025-06-18):
+
+### Transport Details
+- **Type**: Streamable HTTP (standard MCP HTTP/SSE)
+- **Mode**: Stateless (no session management)
+- **Endpoint**: Single endpoint at `/` handles both POST and GET
+- **Connection URL**: `http://localhost:3001/`
+
+### Endpoints
+- `POST /` - Standard MCP message endpoint
+  - Accepts JSON-RPC messages
+  - Returns either JSON responses or SSE streams
+  - Must include `Accept: application/json, text/event-stream` header
+  - Must include `MCP-Protocol-Version` header
+- `GET /` - Optional SSE stream endpoint
+  - Opens Server-Sent Events stream
+  - Enables server-initiated messages
+  - Supports `Last-Event-ID` for resumable streams
+- `GET /health` - Health check endpoint
+
+### Protocol Compliance
+- Follows MCP specification version 2025-06-18
+- Supports both single JSON responses and SSE streaming
+- CORS enabled with proper MCP headers
+- Stateless operation (no session tracking)
+
+## Environment Configuration
+
+The server uses `dotenv` to load environment variables from a `.env` file:
+- `PORT` - Server port (default: 3001)
+
+Create a `.env` file in the project root:
+```
+PORT=3001
+```
 
 ## TypeScript Configuration
 

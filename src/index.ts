@@ -1,36 +1,34 @@
 #!/usr/bin/env node
 
+import "dotenv/config";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import axios, { AxiosInstance } from "axios";
+import axios from "axios";
+import express, { Request, Response } from "express";
+import cors from "cors";
+import { tools } from "./tools.js";
+import { ToolHandlers } from "./handlers.js";
 
-const BASE_URL = "https://galliwasp.eea.europa.eu/catalogue/srv/api";
-
-interface EEACatalogueConfig {
-  baseUrl: string;
-  portal: string;
-}
+const CONFIG = {
+  BASE_URL: "https://galliwasp.eea.europa.eu/catalogue/srv/api",
+  PORT: process.env.PORT || 3001,
+  TIMEOUT: 30000,
+} as const;
 
 class EEACatalogueServer {
   private server: Server;
-  private axiosInstance: AxiosInstance;
-  private config: EEACatalogueConfig;
+  private app: express.Application;
+  private handlers: ToolHandlers;
 
   constructor() {
-    this.config = {
-      baseUrl: BASE_URL,
-      portal: "eng",
-    };
-
     this.server = new Server(
       {
         name: "eea-sdi-catalogue",
-        version: "1.0.0",
+        version: "2.0.0",
       },
       {
         capabilities: {
@@ -39,17 +37,42 @@ class EEACatalogueServer {
       }
     );
 
-    this.axiosInstance = axios.create({
-      baseURL: this.config.baseUrl,
+    this.app = express();
+    this.setupExpress();
+
+    const axiosInstance = axios.create({
+      baseURL: CONFIG.BASE_URL,
       headers: {
-        "Accept": "application/json",
+        Accept: "application/json",
         "Content-Type": "application/json",
       },
-      timeout: 30000,
+      timeout: CONFIG.TIMEOUT,
     });
+
+    this.handlers = new ToolHandlers(axiosInstance);
 
     this.setupHandlers();
     this.setupErrorHandling();
+    this.setupHTTPRoutes();
+  }
+
+  private setupExpress(): void {
+    this.app.use(
+      cors({
+        origin: true,
+        credentials: true,
+        methods: ["GET", "POST", "OPTIONS"],
+        allowedHeaders: [
+          "Content-Type",
+          "Accept",
+          "MCP-Protocol-Version",
+          "Mcp-Session-Id",
+          "Last-Event-ID",
+        ],
+        exposedHeaders: ["Mcp-Session-Id"],
+      })
+    );
+    this.app.use(express.json());
   }
 
   private setupErrorHandling(): void {
@@ -65,448 +88,100 @@ class EEACatalogueServer {
 
   private setupHandlers(): void {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: this.getTools(),
+      tools,
     }));
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) =>
-      this.handleToolCall(request)
+    this.server.setRequestHandler(
+      CallToolRequestSchema,
+      async (request) => await this.handleToolCall(request)
     );
   }
 
-  private getTools(): Tool[] {
-    return [
-      {
-        name: "search_records",
-        description: "Search for metadata records in the EEA catalogue. Supports full Elasticsearch query syntax.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "Search query text (searches across all fields)",
-            },
-            from: {
-              type: "number",
-              description: "Starting position for results (default: 0)",
-              default: 0,
-            },
-            size: {
-              type: "number",
-              description: "Number of results to return (default: 10, max: 100)",
-              default: 10,
-            },
-            bucket: {
-              type: "string",
-              description: "Filter by specific facet bucket",
-            },
-            sortBy: {
-              type: "string",
-              description: "Field to sort by (e.g., 'resourceTitleObject.default.sort')",
-            },
-            sortOrder: {
-              type: "string",
-              enum: ["asc", "desc"],
-              description: "Sort order (ascending or descending)",
-            },
-          },
-        },
-      },
-      {
-        name: "get_record",
-        description: "Get detailed metadata for a specific record by its UUID or ID",
-        inputSchema: {
-          type: "object",
-          properties: {
-            uuid: {
-              type: "string",
-              description: "The UUID or ID of the metadata record",
-            },
-            approved: {
-              type: "boolean",
-              description: "Only return approved versions (default: true)",
-              default: true,
-            },
-          },
-          required: ["uuid"],
-        },
-      },
-      {
-        name: "get_record_formatters",
-        description: "Get available formatters (export formats) for a metadata record",
-        inputSchema: {
-          type: "object",
-          properties: {
-            uuid: {
-              type: "string",
-              description: "The UUID of the metadata record",
-            },
-          },
-          required: ["uuid"],
-        },
-      },
-      {
-        name: "export_record",
-        description: "Export a metadata record in a specific format (XML, PDF, etc.)",
-        inputSchema: {
-          type: "object",
-          properties: {
-            uuid: {
-              type: "string",
-              description: "The UUID of the metadata record",
-            },
-            formatter: {
-              type: "string",
-              description: "The formatter/format to use (e.g., 'xml', 'pdf', 'full_view')",
-            },
-          },
-          required: ["uuid", "formatter"],
-        },
-      },
-      {
-        name: "list_groups",
-        description: "List all groups in the catalogue",
-        inputSchema: {
-          type: "object",
-          properties: {
-            withReservedGroup: {
-              type: "boolean",
-              description: "Include reserved system groups",
-              default: false,
-            },
-          },
-        },
-      },
-      {
-        name: "get_sources",
-        description: "Get information about catalogue sources (sub-portals)",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "get_site_info",
-        description: "Get general information about the catalogue site configuration",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "get_related_records",
-        description: "Get records related to a specific record (parent, children, services, datasets, etc.)",
-        inputSchema: {
-          type: "object",
-          properties: {
-            uuid: {
-              type: "string",
-              description: "The UUID of the metadata record",
-            },
-            type: {
-              type: "string",
-              description: "Type of relationship (e.g., 'children', 'parent', 'services', 'datasets', 'sources', 'associated')",
-            },
-          },
-          required: ["uuid"],
-        },
-      },
-      {
-        name: "get_tags",
-        description: "Get all available tags/categories in the catalogue",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "get_regions",
-        description: "Get geographic regions/extents available in the catalogue",
-        inputSchema: {
-          type: "object",
-          properties: {
-            categoryId: {
-              type: "string",
-              description: "Filter regions by category ID",
-            },
-          },
-        },
-      },
-      {
-        name: "search_by_extent",
-        description: "Search for records by geographic extent (bounding box)",
-        inputSchema: {
-          type: "object",
-          properties: {
-            minx: {
-              type: "number",
-              description: "Minimum longitude (west)",
-            },
-            miny: {
-              type: "number",
-              description: "Minimum latitude (south)",
-            },
-            maxx: {
-              type: "number",
-              description: "Maximum longitude (east)",
-            },
-            maxy: {
-              type: "number",
-              description: "Maximum latitude (north)",
-            },
-            relation: {
-              type: "string",
-              enum: ["intersects", "within", "contains"],
-              description: "Spatial relationship (default: intersects)",
-              default: "intersects",
-            },
-          },
-          required: ["minx", "miny", "maxx", "maxy"],
-        },
-      },
-    ];
+  private setupHTTPRoutes(): void {
+    // Health check endpoint
+    this.app.get("/health", (_req, res) => {
+      res.json({ status: "ok", service: "eea-sdi-catalogue-mcp" });
+    });
+
+    // MCP HTTP handler helper
+    const handleMCPRequest = async (req: Request, res: Response, body: any = null) => {
+      try {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined, // Stateless mode
+          enableJsonResponse: true,
+        });
+
+        await this.server.connect(transport);
+        await transport.handleRequest(req, res, body);
+      } catch (error: any) {
+        console.error(`[MCP Error]`, error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: error.message });
+        }
+      }
+    };
+
+    // Standard MCP Streamable HTTP endpoint - POST for messages
+    this.app.post("/", (req, res) => handleMCPRequest(req, res, req.body));
+
+    // GET endpoint for SSE streams (optional, for server-initiated messages)
+    this.app.get("/", (req, res) => handleMCPRequest(req, res, null));
   }
 
   private async handleToolCall(request: any) {
     const { name, arguments: args } = request.params;
 
+    console.log(`[Tool] ${name}`, args);
+
     try {
-      switch (name) {
-        case "search_records":
-          return await this.searchRecords(args);
-        case "get_record":
-          return await this.getRecord(args);
-        case "get_record_formatters":
-          return await this.getRecordFormatters(args);
-        case "export_record":
-          return await this.exportRecord(args);
-        case "list_groups":
-          return await this.listGroups(args);
-        case "get_sources":
-          return await this.getSources();
-        case "get_site_info":
-          return await this.getSiteInfo();
-        case "get_related_records":
-          return await this.getRelatedRecords(args);
-        case "get_tags":
-          return await this.getTags();
-        case "get_regions":
-          return await this.getRegions(args);
-        case "search_by_extent":
-          return await this.searchByExtent(args);
-        default:
-          throw new Error(`Unknown tool: ${name}`);
+      const toolHandlers: Record<string, () => Promise<any>> = {
+        search_records: () => this.handlers.searchRecords(args),
+        get_record: () => this.handlers.getRecord(args),
+        get_record_formatters: () => this.handlers.getRecordFormatters(args),
+        export_record: () => this.handlers.exportRecord(args),
+        list_groups: () => this.handlers.listGroups(args),
+        get_sources: () => this.handlers.getSources(),
+        get_site_info: () => this.handlers.getSiteInfo(),
+        get_related_records: () => this.handlers.getRelatedRecords(args),
+        get_tags: () => this.handlers.getTags(),
+        get_regions: () => this.handlers.getRegions(args),
+        search_by_extent: () => this.handlers.searchByExtent(args),
+        duplicate_record: () => this.handlers.duplicateRecord(args),
+      };
+
+      const handler = toolHandlers[name];
+      if (!handler) {
+        throw new Error(`Unknown tool: ${name}`);
       }
+
+      return await handler();
     } catch (error: any) {
+      const errorMessage = [
+        `Error: ${error.message}`,
+        error.response?.status && `Status: ${error.response.status}`,
+        error.response?.data && JSON.stringify(error.response.data, null, 2),
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      console.error(`[Tool Error] ${name}:`, errorMessage);
+
       return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error.message}\n${error.response?.data ? JSON.stringify(error.response.data, null, 2) : ""}`,
-          },
-        ],
+        content: [{ type: "text", text: errorMessage }],
         isError: true,
       };
     }
   }
 
-  private async searchRecords(args: any) {
-    const { query = "", from = 0, size = 10, bucket, sortBy, sortOrder } = args;
-
-    const searchParams: any = {
-      from,
-      size: Math.min(size, 100),
-    };
-
-    if (query) {
-      searchParams.any = query;
-    }
-
-    if (bucket) {
-      searchParams.bucket = bucket;
-    }
-
-    if (sortBy) {
-      searchParams.sortBy = sortBy;
-      searchParams.sortOrder = sortOrder || "asc";
-    }
-
-    const response = await this.axiosInstance.get("/search/records/_search", {
-      params: searchParams,
-    });
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getRecord(args: any) {
-    const { uuid, approved = true } = args;
-    const response = await this.axiosInstance.get(`/records/${uuid}`, {
-      params: { approved },
-    });
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getRecordFormatters(args: any) {
-    const { uuid } = args;
-    const response = await this.axiosInstance.get(
-      `/records/${uuid}/formatters`
-    );
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async exportRecord(args: any) {
-    const { uuid, formatter } = args;
-    const response = await this.axiosInstance.get(
-      `/records/${uuid}/formatters/${formatter}`,
-      {
-        responseType: "text",
-      }
-    );
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: response.data,
-        },
-      ],
-    };
-  }
-
-  private async listGroups(args: any) {
-    const { withReservedGroup = false } = args;
-    const response = await this.axiosInstance.get("/groups", {
-      params: { withReservedGroup },
-    });
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getSources() {
-    const response = await this.axiosInstance.get("/sources");
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getSiteInfo() {
-    const response = await this.axiosInstance.get("/site");
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getRelatedRecords(args: any) {
-    const { uuid, type } = args;
-    const endpoint = type
-      ? `/related/${uuid}?type=${type}`
-      : `/related/${uuid}`;
-    const response = await this.axiosInstance.get(endpoint);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getTags() {
-    const response = await this.axiosInstance.get("/tags");
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getRegions(args: any) {
-    const { categoryId } = args;
-    const response = await this.axiosInstance.get("/regions", {
-      params: categoryId ? { categoryId } : {},
-    });
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async searchByExtent(args: any) {
-    const { minx, miny, maxx, maxy, relation = "intersects" } = args;
-
-    const response = await this.axiosInstance.get("/search/records/_search", {
-      params: {
-        geometry: `${minx},${miny},${maxx},${maxy}`,
-        relation,
-      },
-    });
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
-  }
-
   async run(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error("EEA SDI Catalogue MCP Server running on stdio");
+    this.app.listen(CONFIG.PORT, () => {
+      console.log(`EEA SDI Catalogue MCP Server running on http://localhost:${CONFIG.PORT}`);
+      console.log(`\nEndpoints:`);
+      console.log(`  GET  /health - Health check`);
+      console.log(`  POST /       - MCP messages`);
+      console.log(`  GET  /       - MCP SSE stream`);
+      console.log(`\nConnect MCP client to: http://localhost:${CONFIG.PORT}/`);
+    });
   }
 }
 

@@ -29,19 +29,17 @@ export class ToolHandlers {
   async searchRecords(args: SearchRecordsArgs): Promise<ToolResponse> {
     const { query = "", from = 0, size = 10, bucket, sortBy, sortOrder } = args;
 
-    const searchParams: Record<string, any> = {
+    const searchBody: Record<string, any> = {
       from,
       size: Math.min(size, 100),
-      ...(query && { any: query }),
-      ...(bucket && { bucket }),
-      ...(sortBy && { sortBy, sortOrder: sortOrder || "asc" }),
+      ...(query && { query: { query_string: { query } } }),
+      ...(bucket && { aggregations: { [bucket]: { terms: { field: bucket } } } }),
+      ...(sortBy && { sort: [{ [sortBy]: { order: sortOrder || "asc" } }] }),
     };
 
-    console.log(`[API] GET /search/records/_search`, searchParams);
+    console.log(`[API] POST /search/records/_search`, JSON.stringify(searchBody, null, 2));
 
-    const response = await this.axiosInstance.get("/search/records/_search", {
-      params: searchParams,
-    });
+    const response = await this.axiosInstance.post("/search/records/_search", searchBody);
 
     console.log(`[API] ${response.status} - Found ${response.data.hits?.total?.value || 0} results`);
 
@@ -116,12 +114,27 @@ export class ToolHandlers {
   async searchByExtent(args: SearchByExtentArgs): Promise<ToolResponse> {
     const { minx, miny, maxx, maxy, relation = "intersects" } = args;
 
-    const response = await this.axiosInstance.get("/search/records/_search", {
-      params: {
-        geometry: `${minx},${miny},${maxx},${maxy}`,
-        relation,
-      },
-    });
+    const searchBody = {
+      query: {
+        bool: {
+          must: [
+            {
+              geo_shape: {
+                geom: {
+                  shape: {
+                    type: "envelope",
+                    coordinates: [[minx, maxy], [maxx, miny]]
+                  },
+                  relation
+                }
+              }
+            }
+          ]
+        }
+      }
+    };
+
+    const response = await this.axiosInstance.post("/search/records/_search", searchBody);
 
     return this.formatResponse(response.data);
   }

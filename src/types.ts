@@ -57,3 +57,9 @@ export interface DuplicateRecordArgs {
   targetUuid?: string;
   hasCategoryOfSource?: boolean;
 }
+
+export interface HandlerConfig {
+  maxSearchResults: number;
+  username: string;
+  password: string;
+}

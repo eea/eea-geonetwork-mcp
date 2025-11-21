@@ -10,10 +10,15 @@ import {
   SearchByExtentArgs,
   DuplicateRecordArgs,
   ToolResponse,
+  HandlerConfig,
 } from "./types.js";
 
 export class ToolHandlers {
-  constructor(private axiosInstance: AxiosInstance) {}
+  private config: HandlerConfig;
+
+  constructor(private axiosInstance: AxiosInstance, config: HandlerConfig) {
+    this.config = config;
+  }
 
   private formatResponse(data: any, isRaw = false): ToolResponse {
     return {
@@ -29,19 +34,32 @@ export class ToolHandlers {
   async searchRecords(args: SearchRecordsArgs): Promise<ToolResponse> {
     const { query = "", from = 0, size = 10, bucket, sortBy, sortOrder } = args;
 
+    // Use configurable max limit to prevent MCP streaming issues with large results
+    const maxSize = this.config.maxSearchResults;
+    const actualSize = Math.min(size, maxSize);
+
+    // Normalize sort order - Elasticsearch only accepts "asc" or "desc"
+    const normalizedSortOrder = sortOrder?.toLowerCase().startsWith("desc") ? "desc" : "asc";
+
     const searchBody: Record<string, any> = {
       from,
-      size: Math.min(size, 100),
+      size: actualSize,
       ...(query && { query: { query_string: { query } } }),
       ...(bucket && { aggregations: { [bucket]: { terms: { field: bucket } } } }),
-      ...(sortBy && { sort: [{ [sortBy]: { order: sortOrder || "asc" } }] }),
+      ...(sortBy && { sort: [{ [sortBy]: { order: normalizedSortOrder } }] }),
     };
 
     console.log(`[API] POST /search/records/_search`, JSON.stringify(searchBody, null, 2));
 
     const response = await this.axiosInstance.post("/search/records/_search", searchBody);
 
-    console.log(`[API] ${response.status} - Found ${response.data.hits?.total?.value || 0} results`);
+    const totalHits = response.data.hits?.total?.value || 0;
+    console.log(`[API] ${response.status} - Found ${totalHits} results (returning ${actualSize}, max: ${maxSize})`);
+
+    // Add warning if results were truncated
+    if (totalHits > actualSize) {
+      response.data._warning = `Results limited to ${actualSize} of ${totalHits} total. Use 'from' parameter to paginate.`;
+    }
 
     return this.formatResponse(response.data);
   }
@@ -140,6 +158,19 @@ export class ToolHandlers {
   }
 
   async duplicateRecord(args: DuplicateRecordArgs): Promise<ToolResponse> {
+    // Check if authentication is configured
+    if (!this.config.username || !this.config.password) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: Authentication required for duplicate_record. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
     const {
       metadataUuid,
       group,
@@ -156,8 +187,14 @@ export class ToolHandlers {
       ...(!hasCategoryOfSource && { hasCategoryOfSource: false }),
     };
 
+    // Create Basic Auth header for this request
+    const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64");
+
     const response = await this.axiosInstance.put("/records/duplicate", null, {
       params,
+      headers: {
+        Authorization: `Basic ${auth}`,
+      },
     });
 
     return this.formatResponse(response.data);

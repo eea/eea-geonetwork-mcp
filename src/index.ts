@@ -10,13 +10,20 @@ import {
 import axios from "axios";
 import express, { Request, Response } from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { tools } from "./tools.js";
 import { ToolHandlers } from "./handlers.js";
 
 const CONFIG = {
-  BASE_URL: "https://galliwasp.eea.europa.eu/catalogue/srv/api",
+  BASE_URL: process.env.BASE_URL || "https://galliwasp.eea.europa.eu/catalogue/srv/api",
   PORT: process.env.PORT || 3001,
   TIMEOUT: 30000,
+  MAX_SEARCH_RESULTS: parseInt(process.env.MAX_SEARCH_RESULTS || "20", 10),
+  RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
+  RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "100", 10),
+  // Authentication for protected endpoints
+  CATALOGUE_USERNAME: process.env.CATALOGUE_USERNAME || "",
+  CATALOGUE_PASSWORD: process.env.CATALOGUE_PASSWORD || "",
 } as const;
 
 class EEACatalogueServer {
@@ -40,16 +47,30 @@ class EEACatalogueServer {
     this.app = express();
     this.setupExpress();
 
+    // Build headers with optional authentication
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+
+    // Add Basic Auth if credentials are configured
+    if (CONFIG.CATALOGUE_USERNAME && CONFIG.CATALOGUE_PASSWORD) {
+      const auth = Buffer.from(`${CONFIG.CATALOGUE_USERNAME}:${CONFIG.CATALOGUE_PASSWORD}`).toString("base64");
+      headers.Authorization = `Basic ${auth}`;
+      console.log(`[Auth] Using Basic Auth for user: ${CONFIG.CATALOGUE_USERNAME}`);
+    }
+
     const axiosInstance = axios.create({
       baseURL: CONFIG.BASE_URL,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
+      headers,
       timeout: CONFIG.TIMEOUT,
     });
 
-    this.handlers = new ToolHandlers(axiosInstance);
+    this.handlers = new ToolHandlers(axiosInstance, {
+      maxSearchResults: CONFIG.MAX_SEARCH_RESULTS,
+      username: CONFIG.CATALOGUE_USERNAME,
+      password: CONFIG.CATALOGUE_PASSWORD,
+    });
 
     this.setupHandlers();
     this.setupErrorHandling();
@@ -57,6 +78,16 @@ class EEACatalogueServer {
   }
 
   private setupExpress(): void {
+    // Rate limiting middleware
+    const limiter = rateLimit({
+      windowMs: CONFIG.RATE_LIMIT_WINDOW_MS,
+      max: CONFIG.RATE_LIMIT_MAX_REQUESTS,
+      message: { error: "Too many requests, please try again later" },
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+    this.app.use(limiter);
+
     this.app.use(
       cors({
         origin: true,

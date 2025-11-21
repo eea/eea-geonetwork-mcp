@@ -103,6 +103,22 @@ class EEACatalogueServer {
       res.json({ status: "ok", service: "eea-sdi-catalogue-mcp" });
     });
 
+    // Browser-friendly info page
+    this.app.get("/info", (_req, res) => {
+      res.json({
+        name: "EEA SDI Catalogue MCP Server",
+        version: "2.0.0",
+        description: "MCP server for EEA SDI Catalogue API (GeoNetwork 4.4.9)",
+        transport: "Streamable HTTP",
+        endpoints: {
+          mcp: "POST /",
+          health: "GET /health",
+          info: "GET /info",
+        },
+        tools: tools.map((t) => ({ name: t.name, description: t.description })),
+      });
+    });
+
     // MCP HTTP handler helper
     const handleMCPRequest = async (req: Request, res: Response, body: any = null) => {
       try {

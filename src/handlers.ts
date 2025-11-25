@@ -14,6 +14,9 @@ import {
   UpdateRecordTitleArgs,
   AddRecordTagsArgs,
   DeleteRecordTagsArgs,
+  UploadResourceFromUrlArgs,
+  GetAttachmentsArgs,
+  DeleteAttachmentArgs,
   ToolResponse,
   HandlerConfig,
 } from "./types.js";
@@ -757,6 +760,129 @@ export class ToolHandlers {
       });
     } catch (error: any) {
       console.log(`[DeleteRecordTags] Error:`, error.response?.data);
+      throw error;
+    }
+  }
+
+  async uploadResourceFromUrl(args: UploadResourceFromUrlArgs): Promise<ToolResponse> {
+    // Check if authentication is configured
+    if (!this.config.username || !this.config.password) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: Authentication required for upload_resource_from_url. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const { metadataUuid, url, visibility = "PUBLIC", approved = false } = args;
+
+    console.log(`[UploadResourceFromUrl] UUID: ${metadataUuid}, URL: ${url}, Visibility: ${visibility}`);
+
+    // Get authenticated session
+    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const baseURL = this.axiosInstance.defaults.baseURL || "";
+
+    try {
+      const response = await axios.put(
+        `${baseURL}/records/${metadataUuid}/attachments`,
+        null,
+        {
+          params: {
+            url,
+            visibility,
+            approved,
+          },
+          headers: {
+            Cookie: cookieHeader,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      console.log(`[UploadResourceFromUrl] Response:`, response.status, JSON.stringify(response.data));
+
+      return this.formatResponse({
+        success: true,
+        message: `Resource uploaded successfully from ${url} to record ${metadataUuid}`,
+        resource: response.data,
+      });
+    } catch (error: any) {
+      console.log(`[UploadResourceFromUrl] Error:`, error.response?.data);
+      throw error;
+    }
+  }
+
+  async getAttachments(args: GetAttachmentsArgs): Promise<ToolResponse> {
+    const { metadataUuid, sort = "name", approved = true, filter = "*" } = args;
+
+    console.log(`[GetAttachments] UUID: ${metadataUuid}, Sort: ${sort}, Filter: ${filter}`);
+
+    try {
+      const response = await this.axiosInstance.get(`/records/${metadataUuid}/attachments`, {
+        params: {
+          sort,
+          approved,
+          filter,
+        },
+      });
+
+      console.log(`[GetAttachments] Found ${response.data?.length || 0} attachments`);
+
+      return this.formatResponse(response.data);
+    } catch (error: any) {
+      console.log(`[GetAttachments] Error:`, error.response?.data);
+      throw error;
+    }
+  }
+
+  async deleteAttachment(args: DeleteAttachmentArgs): Promise<ToolResponse> {
+    // Check if authentication is configured
+    if (!this.config.username || !this.config.password) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: Authentication required for delete_attachment. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const { metadataUuid, resourceId, approved = false } = args;
+
+    console.log(`[DeleteAttachment] UUID: ${metadataUuid}, Resource ID: ${resourceId}`);
+
+    // Get authenticated session
+    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const baseURL = this.axiosInstance.defaults.baseURL || "";
+
+    try {
+      const response = await axios.delete(
+        `${baseURL}/records/${metadataUuid}/attachments/${resourceId}`,
+        {
+          params: {
+            approved,
+          },
+          headers: {
+            Cookie: cookieHeader,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      console.log(`[DeleteAttachment] Response:`, response.status);
+
+      return this.formatResponse({
+        success: true,
+        message: `Attachment ${resourceId} deleted from record ${metadataUuid}`,
+      });
+    } catch (error: any) {
+      console.log(`[DeleteAttachment] Error:`, error.response?.data);
       throw error;
     }
   }

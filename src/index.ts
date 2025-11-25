@@ -199,6 +199,9 @@ class SdiCatalogueServer {
         update_record_title: () => this.handlers.updateRecordTitle(args),
         add_record_tags: () => this.handlers.addRecordTags(args),
         delete_record_tags: () => this.handlers.deleteRecordTags(args),
+        upload_resource_from_url: () => this.handlers.uploadResourceFromUrl(args),
+        get_attachments: () => this.handlers.getAttachments(args),
+        delete_attachment: () => this.handlers.deleteAttachment(args),
       };
 
       const handler = toolHandlers[name];

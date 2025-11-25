@@ -85,6 +85,26 @@ export interface DeleteRecordTagsArgs {
   tags: number[];
 }
 
+export interface UploadResourceFromUrlArgs {
+  metadataUuid: string;
+  url: string;
+  visibility?: "PUBLIC" | "PRIVATE";
+  approved?: boolean;
+}
+
+export interface GetAttachmentsArgs {
+  metadataUuid: string;
+  sort?: "type" | "name";
+  approved?: boolean;
+  filter?: string;
+}
+
+export interface DeleteAttachmentArgs {
+  metadataUuid: string;
+  resourceId: string;
+  approved?: boolean;
+}
+
 export interface HandlerConfig {
   maxSearchResults: number;
   username: string;

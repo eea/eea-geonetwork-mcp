@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server that provides tools to interact with the E
 
 ## Features
 
-This MCP server provides 17 tools for interacting with the EEA SDI Catalogue:
+This MCP server provides 20 tools for interacting with the EEA SDI Catalogue:
 
 ### Search & Discovery
 - **search_records** - Search for metadata records with full Elasticsearch query support
@@ -23,6 +23,11 @@ This MCP server provides 17 tools for interacting with the EEA SDI Catalogue:
 - **update_record_title** - Simplified tool to update a record's title (auto-detects schema)
 - **add_record_tags** - Add tags/categories to a record
 - **delete_record_tags** - Remove tags/categories from a record
+
+### Resource/Attachment Management
+- **upload_resource_from_url** - Upload a file from a URL to a metadata record (requires authentication)
+- **get_attachments** - List all attachments/resources for a metadata record
+- **delete_attachment** - Delete a specific attachment from a record (requires authentication)
 
 ### Catalogue Information
 - **get_site_info** - Get catalogue configuration and site information
@@ -152,7 +157,7 @@ The server uses the official MCP SDK with Streamable HTTP transport (stateless m
 - **Axios client** communicates with the EEA GeoNetwork API (30s timeout)
 - **Modular design** with separate files:
   - `src/index.ts` - Server setup and routing
-  - `src/tools.ts` - Tool definitions (17 tools)
+  - `src/tools.ts` - Tool definitions (20 tools)
   - `src/handlers.ts` - Tool implementation handlers
   - `src/types.ts` - TypeScript interfaces
 
@@ -247,6 +252,41 @@ Remove tags (categories) from a metadata record. **Requires authentication.**
 **Parameters:**
 - `uuid` (string, required): UUID of the record
 - `tags` (array of numbers, required): Array of tag IDs to remove
+
+### upload_resource_from_url
+Upload a resource (file/document) to a metadata record from a URL. The file will be downloaded from the URL and attached to the record. **Requires authentication.**
+
+**Parameters:**
+- `metadataUuid` (string, required): UUID of the metadata record to attach the resource to
+- `url` (string, required): The URL of the file to download and attach
+- `visibility` (string, optional): The sharing policy - "PUBLIC" or "PRIVATE" (default: PUBLIC)
+- `approved` (boolean, optional): Use approved version or not (default: false)
+
+**Example use case:**
+- Attach a data file from an external server to a metadata record
+- Link documentation PDFs to metadata records
+- Attach images or visualizations stored on web servers
+
+### get_attachments
+List all attachments/resources for a metadata record.
+
+**Parameters:**
+- `metadataUuid` (string, required): UUID of the metadata record
+- `sort` (string, optional): Sort results by "type" or "name" (default: name)
+- `approved` (boolean, optional): Use approved version or not (default: true)
+- `filter` (string, optional): Filter pattern for attachment names (default: *)
+
+**Returns:** Array of attachment objects with details like filename, type, URL, size, etc.
+
+### delete_attachment
+Delete a specific attachment from a metadata record. **Requires authentication.**
+
+**Parameters:**
+- `metadataUuid` (string, required): UUID of the metadata record
+- `resourceId` (string, required): The ID/filename of the resource to delete
+- `approved` (boolean, optional): Use approved version or not (default: false)
+
+**Note:** Use `get_attachments` first to find the exact resourceId of the attachment you want to delete.
 
 ## License
 

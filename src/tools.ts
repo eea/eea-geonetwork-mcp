@@ -324,4 +324,86 @@ export const tools: Tool[] = [
       required: ["uuid", "tags"],
     },
   },
+  {
+    name: "upload_resource_from_url",
+    description: "Upload a resource (file/document) to a metadata record from a URL. The file will be downloaded from the URL and attached to the record. Requires authentication.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "The UUID of the metadata record to attach the resource to",
+        },
+        url: {
+          type: "string",
+          description: "The URL of the file to download and attach",
+        },
+        visibility: {
+          type: "string",
+          enum: ["PUBLIC", "PRIVATE"],
+          description: "The sharing policy for the resource (default: PUBLIC)",
+          default: "PUBLIC",
+        },
+        approved: {
+          type: "boolean",
+          description: "Use approved version or not (default: false)",
+          default: false,
+        },
+      },
+      required: ["metadataUuid", "url"],
+    },
+  },
+  {
+    name: "get_attachments",
+    description: "List all attachments/resources for a metadata record",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "The UUID of the metadata record",
+        },
+        sort: {
+          type: "string",
+          enum: ["type", "name"],
+          description: "Sort results by type or name (default: name)",
+          default: "name",
+        },
+        approved: {
+          type: "boolean",
+          description: "Use approved version or not (default: true)",
+          default: true,
+        },
+        filter: {
+          type: "string",
+          description: "Filter pattern for attachment names (default: *)",
+          default: "*",
+        },
+      },
+      required: ["metadataUuid"],
+    },
+  },
+  {
+    name: "delete_attachment",
+    description: "Delete a specific attachment from a metadata record. Requires authentication.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "The UUID of the metadata record",
+        },
+        resourceId: {
+          type: "string",
+          description: "The ID/filename of the resource to delete",
+        },
+        approved: {
+          type: "boolean",
+          description: "Use approved version or not (default: false)",
+          default: false,
+        },
+      },
+      required: ["metadataUuid", "resourceId"],
+    },
+  },
 ];

@@ -81,6 +81,9 @@ The server will start on port 3001 (or the port specified in the `PORT` environm
 
 **Available endpoints:**
 - `GET http://localhost:3001/health` - Health check endpoint
+- `GET http://localhost:3001/info` - Server information
+- `POST http://localhost:3001/upload` - Upload file to basket (multipart/form-data)
+- `GET http://localhost:3001/uploads/:filename` - Retrieve uploaded file
 - `POST http://localhost:3001/` - MCP message endpoint (standard JSON-RPC)
 - `GET http://localhost:3001/` - MCP SSE stream endpoint (for server-initiated messages)
 
@@ -90,6 +93,28 @@ The server will start on port 3001 (or the port specified in the `PORT` environm
 curl http://localhost:3001/health
 
 # Should return: {"status":"ok","service":"eea-sdi-catalogue-mcp"}
+
+# Upload a file to the basket
+curl -X POST http://localhost:3001/upload -F "file=@myfile.pdf"
+
+# Returns: {"success":true,"file":{"url":"http://localhost:3001/uploads/myfile-123456789.pdf",...}}
+```
+
+### Upload Basket
+
+The server includes a built-in upload basket for temporary file storage. This allows LLMs to upload files first, then attach them to metadata records using the URL.
+
+**How it works:**
+1. Upload a file via `POST /upload` endpoint
+2. Server stores the file in the `uploads/` directory
+3. Server returns a URL: `http://localhost:3001/uploads/filename`
+4. Use this URL with `upload_resource_from_url` tool to attach to metadata records
+
+**Configuration:**
+```bash
+# Optional environment variables
+UPLOAD_DIR=./uploads           # Upload directory (default: ./uploads)
+MAX_FILE_SIZE=104857600        # Max file size in bytes (default: 100MB)
 ```
 
 ### With Claude Desktop

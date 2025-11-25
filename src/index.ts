@@ -11,6 +11,9 @@ import axios from "axios";
 import express, { Request, Response } from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { tools } from "./tools.js";
 import { ToolHandlers } from "./handlers.js";
 
@@ -24,7 +27,37 @@ const CONFIG = {
   // Authentication for protected endpoints
   CATALOGUE_USERNAME: process.env.CATALOGUE_USERNAME || "",
   CATALOGUE_PASSWORD: process.env.CATALOGUE_PASSWORD || "",
+  // Upload basket configuration
+  UPLOAD_DIR: process.env.UPLOAD_DIR || "./uploads",
+  MAX_FILE_SIZE: parseInt(process.env.MAX_FILE_SIZE || "104857600", 10), // 100MB default
 } as const;
+
+// Ensure upload directory exists
+if (!fs.existsSync(CONFIG.UPLOAD_DIR)) {
+  fs.mkdirSync(CONFIG.UPLOAD_DIR, { recursive: true });
+  console.log(`[Upload] Created upload directory: ${CONFIG.UPLOAD_DIR}`);
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, CONFIG.UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    cb(null, `${basename}-${uniqueSuffix}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: CONFIG.MAX_FILE_SIZE
+  }
+});
 
 class SdiCatalogueServer {
   private server: Server;
@@ -145,9 +178,61 @@ class SdiCatalogueServer {
           mcp: "POST /",
           health: "GET /health",
           info: "GET /info",
+          upload: "POST /upload",
+          uploads: "GET /uploads/:filename",
         },
         tools: tools.map((t) => ({ name: t.name, description: t.description })),
       });
+    });
+
+    // Upload basket endpoint - accepts file uploads
+    this.app.post("/upload", upload.single("file"), (req, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: "No file uploaded" });
+        }
+
+        const fileUrl = `http://localhost:${CONFIG.PORT}/uploads/${req.file.filename}`;
+
+        console.log(`[Upload] File uploaded: ${req.file.originalname} -> ${req.file.filename}`);
+        console.log(`[Upload] Accessible at: ${fileUrl}`);
+
+        res.json({
+          success: true,
+          message: "File uploaded successfully",
+          file: {
+            originalName: req.file.originalname,
+            filename: req.file.filename,
+            size: req.file.size,
+            mimetype: req.file.mimetype,
+            url: fileUrl,
+          },
+        });
+      } catch (error: any) {
+        console.error(`[Upload Error]`, error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Serve uploaded files
+    this.app.get("/uploads/:filename", (req, res) => {
+      const filename = req.params.filename;
+      const filepath = path.join(CONFIG.UPLOAD_DIR, filename);
+
+      // Security check - prevent directory traversal
+      const resolvedPath = path.resolve(filepath);
+      const uploadDirPath = path.resolve(CONFIG.UPLOAD_DIR);
+
+      if (!resolvedPath.startsWith(uploadDirPath)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (!fs.existsSync(filepath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      console.log(`[Upload] Serving file: ${filename}`);
+      res.sendFile(resolvedPath);
     });
 
     // MCP HTTP handler helper
@@ -232,9 +317,15 @@ class SdiCatalogueServer {
     this.app.listen(CONFIG.PORT, () => {
       console.log(`EEA SDI Catalogue MCP Server running on http://localhost:${CONFIG.PORT}`);
       console.log(`\nEndpoints:`);
-      console.log(`  GET  /health - Health check`);
-      console.log(`  POST /       - MCP messages`);
-      console.log(`  GET  /       - MCP SSE stream`);
+      console.log(`  GET  /health          - Health check`);
+      console.log(`  GET  /info            - Server information`);
+      console.log(`  POST /upload          - Upload file to basket`);
+      console.log(`  GET  /uploads/:file   - Retrieve uploaded file`);
+      console.log(`  POST /                - MCP messages`);
+      console.log(`  GET  /                - MCP SSE stream`);
+      console.log(`\nUpload basket:`);
+      console.log(`  Directory: ${CONFIG.UPLOAD_DIR}`);
+      console.log(`  Max file size: ${(CONFIG.MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB`);
       console.log(`\nConnect MCP client to: http://localhost:${CONFIG.PORT}/`);
     });
   }

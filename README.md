@@ -4,18 +4,25 @@ A Model Context Protocol (MCP) server that provides tools to interact with the E
 
 ## Features
 
-This MCP server provides 12 tools for interacting with the EEA SDI Catalogue:
+This MCP server provides 17 tools for interacting with the EEA SDI Catalogue:
 
 ### Search & Discovery
 - **search_records** - Search for metadata records with full Elasticsearch query support
 - **search_by_extent** - Find records by geographic bounding box
-- **get_record** - Retrieve detailed metadata for a specific record
+- **get_record** - Retrieve detailed metadata for a specific record by UUID
+- **get_record_by_id** - Retrieve a record by its internal numeric ID
 - **get_related_records** - Find related records (parent, children, services, datasets)
 
 ### Data Export & Management
 - **get_record_formatters** - List available export formats for a record
 - **export_record** - Export metadata in various formats (XML, PDF, etc.)
-- **duplicate_record** - Duplicate an existing metadata record
+- **duplicate_record** - Duplicate an existing metadata record (requires authentication)
+
+### Record Editing (Requires Authentication)
+- **update_record** - Update any field using XPath (supports ISO 19139 and ISO 19115-3)
+- **update_record_title** - Simplified tool to update a record's title (auto-detects schema)
+- **add_record_tags** - Add tags/categories to a record
+- **delete_record_tags** - Remove tags/categories from a record
 
 ### Catalogue Information
 - **get_site_info** - Get catalogue configuration and site information
@@ -40,7 +47,19 @@ npm run build
 ```bash
 # Create a .env file in the project root
 PORT=3001
+BASE_URL=https://galliwasp.eea.europa.eu/catalogue/srv/api
+MAX_SEARCH_RESULTS=20
+
+# Authentication for write operations (duplicate, update)
+CATALOGUE_USERNAME=your_username
+CATALOGUE_PASSWORD='your_password'
+
+# Rate limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
 ```
+
+**Note:** For passwords containing special characters (`$`, `#`, etc.), wrap the value in single quotes.
 
 ## Usage
 
@@ -133,7 +152,7 @@ The server uses the official MCP SDK with Streamable HTTP transport (stateless m
 - **Axios client** communicates with the EEA GeoNetwork API (30s timeout)
 - **Modular design** with separate files:
   - `src/index.ts` - Server setup and routing
-  - `src/tools.ts` - Tool definitions (12 tools)
+  - `src/tools.ts` - Tool definitions (17 tools)
   - `src/handlers.ts` - Tool implementation handlers
   - `src/types.ts` - TypeScript interfaces
 
@@ -177,7 +196,7 @@ Export a metadata record in a specific format.
 Use `get_record_formatters` first to see available formats for a record.
 
 ### duplicate_record
-Duplicate an existing metadata record with a new UUID.
+Duplicate an existing metadata record with a new UUID. **Requires authentication.**
 
 **Parameters:**
 - `metadataUuid` (string, required): UUID of the record to duplicate
@@ -185,6 +204,49 @@ Duplicate an existing metadata record with a new UUID.
 - `isChildOfSource` (boolean, optional): Set the source record as parent of the new record (default: false)
 - `targetUuid` (string, optional): Specific UUID to use for the duplicated record (auto-generated if not provided)
 - `hasCategoryOfSource` (boolean, optional): Copy categories from source record (default: true)
+
+### get_record_by_id
+Retrieve a metadata record by its internal numeric ID. Useful for getting the UUID after a duplicate operation.
+
+**Parameters:**
+- `id` (number, required): Internal numeric ID of the record
+
+### update_record
+Update a metadata record field using XPath. **Requires authentication.**
+
+**Parameters:**
+- `uuid` (string, required): UUID of the record to update
+- `xpath` (string, required): XPath to the element to update
+- `value` (string, required): New value (text for simple replacement, or full XML element)
+- `operation` (string, optional): Operation type - "replace" (default), "add", or "delete"
+- `updateDateStamp` (boolean, optional): Update the record's timestamp (default: true)
+
+**Common XPaths:**
+- ISO 19139 title: `gmd:identificationInfo/*/gmd:citation/gmd:CI_Citation/gmd:title/gco:CharacterString`
+- ISO 19115-3 title: `mdb:identificationInfo/*/mri:citation/cit:CI_Citation/cit:title/gco:CharacterString`
+
+### update_record_title
+Simplified tool to update a record's title. Automatically detects the schema (ISO 19139 or ISO 19115-3) and uses the correct XPath. **Requires authentication.**
+
+**Parameters:**
+- `uuid` (string, required): UUID of the record to update
+- `title` (string, required): New title for the record
+
+### add_record_tags
+Add tags (categories) to a metadata record. **Requires authentication.**
+
+**Parameters:**
+- `uuid` (string, required): UUID of the record
+- `tags` (array of numbers, required): Array of tag IDs to add
+
+Use `get_tags` first to find available tag IDs.
+
+### delete_record_tags
+Remove tags (categories) from a metadata record. **Requires authentication.**
+
+**Parameters:**
+- `uuid` (string, required): UUID of the record
+- `tags` (array of numbers, required): Array of tag IDs to remove
 
 ## License
 

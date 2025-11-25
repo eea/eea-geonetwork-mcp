@@ -58,6 +58,33 @@ export interface DuplicateRecordArgs {
   hasCategoryOfSource?: boolean;
 }
 
+export interface UpdateRecordArgs {
+  uuid: string;
+  xpath: string;
+  value: string;
+  operation?: "replace" | "add" | "delete";
+  updateDateStamp?: boolean;
+}
+
+export interface GetRecordByIdArgs {
+  id: number;
+}
+
+export interface UpdateRecordTitleArgs {
+  uuid: string;
+  title: string;
+}
+
+export interface AddRecordTagsArgs {
+  uuid: string;
+  tags: number[];
+}
+
+export interface DeleteRecordTagsArgs {
+  uuid: string;
+  tags: number[];
+}
+
 export interface HandlerConfig {
   maxSearchResults: number;
   username: string;

@@ -15,18 +15,18 @@ import { tools } from "./tools.js";
 import { ToolHandlers } from "./handlers.js";
 
 const CONFIG = {
-  BASE_URL: process.env.BASE_URL || "https://galliwasp.eea.europa.eu/catalogue/srv/api",
+  BASE_URL: process.env.BASE_URL,
   PORT: process.env.PORT || 3001,
   TIMEOUT: 30000,
-  MAX_SEARCH_RESULTS: parseInt(process.env.MAX_SEARCH_RESULTS || "20", 10),
-  RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
-  RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "100", 10),
+  MAX_SEARCH_RESULTS: parseInt(process.env.MAX_SEARCH_RESULTS||"", 10),
+  RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "", 10),
+  RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "", 10),
   // Authentication for protected endpoints
   CATALOGUE_USERNAME: process.env.CATALOGUE_USERNAME || "",
   CATALOGUE_PASSWORD: process.env.CATALOGUE_PASSWORD || "",
 } as const;
 
-class EEACatalogueServer {
+class SdiCatalogueServer {
   private server: Server;
   private app: express.Application;
   private handlers: ToolHandlers;
@@ -92,7 +92,7 @@ class EEACatalogueServer {
       cors({
         origin: true,
         credentials: true,
-        methods: ["GET", "POST", "OPTIONS"],
+        methods: ["GET", "POST", "PUT","DELETE", "OPTIONS"],
         allowedHeaders: [
           "Content-Type",
           "Accept",
@@ -194,6 +194,11 @@ class EEACatalogueServer {
         get_regions: () => this.handlers.getRegions(args),
         search_by_extent: () => this.handlers.searchByExtent(args),
         duplicate_record: () => this.handlers.duplicateRecord(args),
+        update_record: () => this.handlers.updateRecord(args),
+        get_record_by_id: () => this.handlers.getRecordById(args),
+        update_record_title: () => this.handlers.updateRecordTitle(args),
+        add_record_tags: () => this.handlers.addRecordTags(args),
+        delete_record_tags: () => this.handlers.deleteRecordTags(args),
       };
 
       const handler = toolHandlers[name];
@@ -232,5 +237,5 @@ class EEACatalogueServer {
   }
 }
 
-const server = new EEACatalogueServer();
+const server = new SdiCatalogueServer();
 server.run().catch(console.error);

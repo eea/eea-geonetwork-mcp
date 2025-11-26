@@ -85,13 +85,6 @@ export interface DeleteRecordTagsArgs {
   tags: number[];
 }
 
-export interface UploadResourceFromUrlArgs {
-  metadataUuid: string;
-  url: string;
-  visibility?: "PUBLIC" | "PRIVATE";
-  approved?: boolean;
-}
-
 export interface GetAttachmentsArgs {
   metadataUuid: string;
   sort?: "type" | "name";
@@ -102,6 +95,13 @@ export interface GetAttachmentsArgs {
 export interface DeleteAttachmentArgs {
   metadataUuid: string;
   resourceId: string;
+  approved?: boolean;
+}
+
+export interface UploadFileToRecordArgs {
+  metadataUuid: string;
+  filePath: string;
+  visibility?: "PUBLIC" | "PRIVATE";
   approved?: boolean;
 }
 

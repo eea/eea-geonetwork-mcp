@@ -325,35 +325,6 @@ export const tools: Tool[] = [
     },
   },
   {
-    name: "upload_resource_from_url",
-    description: "Upload a resource (file/document) to a metadata record from a URL. The file will be downloaded from the URL and attached to the record. Requires authentication.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        metadataUuid: {
-          type: "string",
-          description: "The UUID of the metadata record to attach the resource to",
-        },
-        url: {
-          type: "string",
-          description: "The URL of the file to download and attach",
-        },
-        visibility: {
-          type: "string",
-          enum: ["PUBLIC", "PRIVATE"],
-          description: "The sharing policy for the resource (default: PUBLIC)",
-          default: "PUBLIC",
-        },
-        approved: {
-          type: "boolean",
-          description: "Use approved version or not (default: false)",
-          default: false,
-        },
-      },
-      required: ["metadataUuid", "url"],
-    },
-  },
-  {
     name: "get_attachments",
     description: "List all attachments/resources for a metadata record",
     inputSchema: {
@@ -404,6 +375,35 @@ export const tools: Tool[] = [
         },
       },
       required: ["metadataUuid", "resourceId"],
+    },
+  },
+  {
+    name: "upload_file_to_record",
+    description: "Upload a file from your local filesystem directly to a metadata record as an attachment. The file will be uploaded as binary data to GeoNetwork. Requires authentication.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "The UUID of the metadata record to attach the file to",
+        },
+        filePath: {
+          type: "string",
+          description: "Absolute path to the local file to upload (e.g., C:\\Users\\name\\file.pdf or /home/user/file.pdf)",
+        },
+        visibility: {
+          type: "string",
+          enum: ["PUBLIC", "PRIVATE"],
+          description: "The sharing policy for the file (default: PUBLIC)",
+          default: "PUBLIC",
+        },
+        approved: {
+          type: "boolean",
+          description: "Use approved version or not (default: false)",
+          default: false,
+        },
+      },
+      required: ["metadataUuid", "filePath"],
     },
   },
 ];

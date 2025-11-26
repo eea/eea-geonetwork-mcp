@@ -25,7 +25,7 @@ This MCP server provides 20 tools for interacting with the EEA SDI Catalogue:
 - **delete_record_tags** - Remove tags/categories from a record
 
 ### Resource/Attachment Management
-- **upload_resource_from_url** - Upload a file from a URL to a metadata record (requires authentication)
+- **upload_file_to_record** - Upload a file from local filesystem directly to a metadata record (requires authentication)
 - **get_attachments** - List all attachments/resources for a metadata record
 - **delete_attachment** - Delete a specific attachment from a record (requires authentication)
 
@@ -102,10 +102,18 @@ curl -X POST http://localhost:3001/upload -F "file=@myfile.pdf"
 
 ### Upload Basket
 
-The server includes a built-in upload basket for temporary file storage. This allows LLMs to upload files first, then attach them to metadata records using the URL.
+The server includes a built-in upload basket for temporary file storage. This allows you to upload files first, then attach them to metadata records using the URL.
+
+**Swagger UI (Easiest Method):**
+1. Open `http://localhost:3001/api-docs` in your browser
+2. Expand the "POST /upload" endpoint
+3. Click "Try it out"
+4. Select a file and click "Execute"
+5. Copy the returned URL from the response
+6. Use this URL with the `upload_resource_from_url` MCP tool
 
 **How it works:**
-1. Upload a file via `POST /upload` endpoint
+1. Upload a file via `POST /upload` endpoint (or use Swagger UI)
 2. Server stores the file in the `uploads/` directory
 3. Server returns a URL: `http://localhost:3001/uploads/filename`
 4. Use this URL with `upload_resource_from_url` tool to attach to metadata records
@@ -116,6 +124,10 @@ The server includes a built-in upload basket for temporary file storage. This al
 UPLOAD_DIR=./uploads           # Upload directory (default: ./uploads)
 MAX_FILE_SIZE=104857600        # Max file size in bytes (default: 100MB)
 ```
+
+**Swagger UI:**
+- Access the interactive API documentation and file upload interface at:
+- `http://localhost:3001/api-docs`
 
 ### With Claude Desktop
 
@@ -278,19 +290,22 @@ Remove tags (categories) from a metadata record. **Requires authentication.**
 - `uuid` (string, required): UUID of the record
 - `tags` (array of numbers, required): Array of tag IDs to remove
 
-### upload_resource_from_url
-Upload a resource (file/document) to a metadata record from a URL. The file will be downloaded from the URL and attached to the record. **Requires authentication.**
+### upload_file_to_record
+Upload a file from your local filesystem directly to a metadata record as an attachment. The file is uploaded as binary data to GeoNetwork. **Requires authentication.**
 
 **Parameters:**
-- `metadataUuid` (string, required): UUID of the metadata record to attach the resource to
-- `url` (string, required): The URL of the file to download and attach
+- `metadataUuid` (string, required): UUID of the metadata record to attach the file to
+- `filePath` (string, required): Absolute path to the local file (e.g., `C:\Users\name\document.pdf` or `/home/user/document.pdf`)
 - `visibility` (string, optional): The sharing policy - "PUBLIC" or "PRIVATE" (default: PUBLIC)
 - `approved` (boolean, optional): Use approved version or not (default: false)
 
-**Example use case:**
-- Attach a data file from an external server to a metadata record
-- Link documentation PDFs to metadata records
-- Attach images or visualizations stored on web servers
+**Example:**
+```
+metadataUuid: "43d7c186-2187-4bcd-8843-41e575a5ef56"
+filePath: "C:\\Documents\\myfile.pdf"
+```
+
+**Note:** This tool directly uploads the file to GeoNetwork. The file must be accessible on the machine running the MCP server.
 
 ### get_attachments
 List all attachments/resources for a metadata record.

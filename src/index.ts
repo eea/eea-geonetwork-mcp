@@ -14,6 +14,7 @@ import rateLimit from "express-rate-limit";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import swaggerUi from "swagger-ui-express";
 import { tools } from "./tools.js";
 import { ToolHandlers } from "./handlers.js";
 
@@ -58,6 +59,167 @@ const upload = multer({
     fileSize: CONFIG.MAX_FILE_SIZE
   }
 });
+
+// OpenAPI/Swagger specification
+const swaggerSpec = {
+  openapi: "3.0.0",
+  info: {
+    title: "EEA SDI Catalogue MCP Server - Upload Basket API",
+    version: "2.0.0",
+    description: "Upload files to the basket for use with the EEA SDI Catalogue. Upload files here, then use the returned URL with the upload_resource_from_url MCP tool to attach them to metadata records.",
+    contact: {
+      name: "EEA SDI Team",
+    },
+  },
+  servers: [
+    {
+      url: `http://localhost:${CONFIG.PORT}`,
+      description: "Local development server",
+    },
+  ],
+  paths: {
+    "/upload": {
+      post: {
+        summary: "Upload file to basket",
+        description: "Upload a file to the temporary upload basket. Returns a URL that can be used with the upload_resource_from_url MCP tool.",
+        tags: ["Upload Basket"],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  file: {
+                    type: "string",
+                    format: "binary",
+                    description: "File to upload (max 100MB)",
+                  },
+                },
+                required: ["file"],
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "File uploaded successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    message: { type: "string", example: "File uploaded successfully" },
+                    file: {
+                      type: "object",
+                      properties: {
+                        originalName: { type: "string", example: "document.pdf" },
+                        filename: { type: "string", example: "document-1234567890.pdf" },
+                        size: { type: "number", example: 1024 },
+                        mimetype: { type: "string", example: "application/pdf" },
+                        url: { type: "string", example: "http://localhost:3001/uploads/document-1234567890.pdf" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "Bad request - no file uploaded",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    error: { type: "string", example: "No file uploaded" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/uploads/{filename}": {
+      get: {
+        summary: "Download uploaded file",
+        description: "Retrieve a previously uploaded file from the basket",
+        tags: ["Upload Basket"],
+        parameters: [
+          {
+            name: "filename",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Filename returned from upload",
+            example: "document-1234567890.pdf",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "File content",
+            content: {
+              "application/octet-stream": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                },
+              },
+            },
+          },
+          "404": {
+            description: "File not found",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    error: { type: "string", example: "File not found" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/health": {
+      get: {
+        summary: "Health check",
+        description: "Check if the server is running",
+        tags: ["System"],
+        responses: {
+          "200": {
+            description: "Server is healthy",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", example: "ok" },
+                    service: { type: "string", example: "eea-sdi-catalogue-mcp" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  tags: [
+    {
+      name: "Upload Basket",
+      description: "Temporary file storage for metadata record attachments",
+    },
+    {
+      name: "System",
+      description: "System health and information endpoints",
+    },
+  ],
+};
 
 class SdiCatalogueServer {
   private server: Server;
@@ -162,6 +324,12 @@ class SdiCatalogueServer {
   }
 
   private setupHTTPRoutes(): void {
+    // Swagger UI documentation
+    this.app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+      customSiteTitle: "EEA SDI Upload Basket API",
+      customCss: '.swagger-ui .topbar { display: none }',
+    }));
+
     // Health check endpoint
     this.app.get("/health", (_req, res) => {
       res.json({ status: "ok", service: "eea-sdi-catalogue-mcp" });
@@ -178,6 +346,7 @@ class SdiCatalogueServer {
           mcp: "POST /",
           health: "GET /health",
           info: "GET /info",
+          swagger: "GET /api-docs",
           upload: "POST /upload",
           uploads: "GET /uploads/:filename",
         },
@@ -284,9 +453,9 @@ class SdiCatalogueServer {
         update_record_title: () => this.handlers.updateRecordTitle(args),
         add_record_tags: () => this.handlers.addRecordTags(args),
         delete_record_tags: () => this.handlers.deleteRecordTags(args),
-        upload_resource_from_url: () => this.handlers.uploadResourceFromUrl(args),
         get_attachments: () => this.handlers.getAttachments(args),
         delete_attachment: () => this.handlers.deleteAttachment(args),
+        upload_file_to_record: () => this.handlers.uploadFileToRecord(args),
       };
 
       const handler = toolHandlers[name];
@@ -319,6 +488,7 @@ class SdiCatalogueServer {
       console.log(`\nEndpoints:`);
       console.log(`  GET  /health          - Health check`);
       console.log(`  GET  /info            - Server information`);
+      console.log(`  GET  /api-docs        - Swagger UI (file upload interface)`);
       console.log(`  POST /upload          - Upload file to basket`);
       console.log(`  GET  /uploads/:file   - Retrieve uploaded file`);
       console.log(`  POST /                - MCP messages`);
@@ -326,6 +496,7 @@ class SdiCatalogueServer {
       console.log(`\nUpload basket:`);
       console.log(`  Directory: ${CONFIG.UPLOAD_DIR}`);
       console.log(`  Max file size: ${(CONFIG.MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB`);
+      console.log(`  Swagger UI: http://localhost:${CONFIG.PORT}/api-docs`);
       console.log(`\nConnect MCP client to: http://localhost:${CONFIG.PORT}/`);
     });
   }

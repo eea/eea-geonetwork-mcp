@@ -198,93 +198,10 @@ export class ToolHandlers {
       ...(!hasCategoryOfSource && { hasCategoryOfSource: false }),
     };
 
-    // GeoNetwork requires session-based auth for write operations
-    const axios = (await import("axios")).default;
+    // Get authenticated session
+    const { cookieHeader, axios } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
-    // Convert /srv/api to base catalogue URL
-    const catalogueURL = baseURL.replace("/srv/api", "");
 
-    console.log(`[Auth] Username: ${this.config.username}`);
-    console.log(`[Auth] Password length: ${this.config.password?.length}`);
-
-    // Step 1: Sign in to get GNSESSIONID (GeoNetwork 5 style)
-    const signinUrl = `${catalogueURL}/api/user/signin`;
-    console.log(`[Auth] Step 1 - Signing in at: ${signinUrl}`);
-
-    // Use URLSearchParams for form-urlencoded data (like a form submit)
-    const formData = new URLSearchParams();
-    formData.append("username", this.config.username);
-    formData.append("password", this.config.password);
-
-    const signinResponse = await axios.post(
-      signinUrl,
-      formData.toString(),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json, text/html",
-        },
-        timeout: 10000,
-        maxRedirects: 0,
-        validateStatus: (status) => status < 400 || status === 302,
-      }
-    );
-
-    console.log(`[Auth] Step 1 - signin status: ${signinResponse.status}`);
-    console.log(`[Auth] Step 1 - signin data:`, JSON.stringify(signinResponse.data));
-    console.log(`[Auth] Step 1 - signin cookies:`, signinResponse.headers["set-cookie"]);
-
-    let gnSessionId = "";
-    let jsSessionId = "";
-    let xsrfToken = "";
-    const signinCookies = signinResponse.headers["set-cookie"] || [];
-
-    for (const cookie of signinCookies) {
-      if (cookie.includes("GNSESSIONID=")) {
-        gnSessionId = cookie.split("GNSESSIONID=")[1].split(";")[0];
-      }
-      if (cookie.includes("JSESSIONID=")) {
-        jsSessionId = cookie.split("JSESSIONID=")[1].split(";")[0];
-      }
-      if (cookie.includes("XSRF-TOKEN=")) {
-        xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
-      }
-    }
-    console.log(`[Auth] Step 1 - GNSESSIONID: ${gnSessionId ? "obtained" : "missing"}, JSESSIONID: ${jsSessionId ? "obtained" : "missing"}, XSRF-TOKEN: ${xsrfToken ? "obtained" : "missing"}`);
-
-    // Step 2: Get JSESSIONID from /srv/api if not already obtained
-    if (!jsSessionId) {
-      const siteResponse = await axios.get(`${baseURL}/site/info`, {
-        headers: {
-          Accept: "application/json",
-          Cookie: gnSessionId ? `GNSESSIONID=${gnSessionId}` : "",
-        },
-        timeout: 10000,
-      });
-
-      const siteCookies = siteResponse.headers["set-cookie"] || [];
-      for (const cookie of siteCookies) {
-        if (cookie.includes("JSESSIONID=")) {
-          jsSessionId = cookie.split("JSESSIONID=")[1].split(";")[0];
-        }
-        if (cookie.includes("XSRF-TOKEN=")) {
-          xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
-        }
-      }
-      console.log(`[Auth] Step 2 - JSESSIONID from /site/info: ${jsSessionId ? "obtained" : "missing"}, XSRF-TOKEN: ${xsrfToken ? "obtained" : "missing"}`);
-    }
-
-    // Build cookie header
-    const cookieParts: string[] = [];
-    if (jsSessionId) cookieParts.push(`JSESSIONID=${jsSessionId}`);
-    if (gnSessionId) cookieParts.push(`GNSESSIONID=${gnSessionId}`);
-    if (xsrfToken) cookieParts.push(`XSRF-TOKEN=${xsrfToken}`);
-    const cookieHeader = cookieParts.join("; ");
-
-    console.log(`[Auth] Cookies: ${cookieHeader}`);
-    console.log(`[Auth] Params:`, params);
-
-    // Step 3: Make the duplicate request with session cookies
     try {
       const response = await axios.put(`${baseURL}/records/duplicate`, null, {
         params,
@@ -295,19 +212,13 @@ export class ToolHandlers {
         },
       });
 
-      // The duplicate endpoint returns the new record's internal ID
-      // Try to fetch the UUID from the response or by querying for it
       const duplicateResult = response.data;
       let newUuid = duplicateResult.uuid || duplicateResult.metadataUuid;
       const newId = duplicateResult.id || duplicateResult.metadataId || duplicateResult;
 
-      console.log(`[Duplicate] Response:`, JSON.stringify(duplicateResult));
-
       // If we got an ID but no UUID, try to look it up
       if (!newUuid && newId && typeof newId === "number") {
-        console.log(`[Duplicate] Looking up UUID for new record ID: ${newId}`);
         try {
-          // Search for the record by internal ID
           const searchBody = {
             query: { term: { _id: newId.toString() } },
             size: 1,
@@ -318,7 +229,7 @@ export class ToolHandlers {
             newUuid = hits[0]._source?.uuid || hits[0]._id;
           }
         } catch (lookupError) {
-          console.log(`[Duplicate] Could not look up UUID for ID ${newId}`);
+          // UUID lookup failed, continue with ID only
         }
       }
 
@@ -331,7 +242,6 @@ export class ToolHandlers {
         rawResponse: duplicateResult,
       });
     } catch (error: any) {
-      console.log(`[Auth] Error response:`, error.response?.data);
       throw error;
     }
   }
@@ -344,13 +254,8 @@ export class ToolHandlers {
     const baseURL = this.axiosInstance.defaults.baseURL || "";
     const catalogueURL = baseURL.replace("/srv/api", "");
 
-    console.log(`[Auth] Attempting authentication with username: ${this.config.username}`);
-    console.log(`[Auth] Username length: ${this.config.username.length}, Password length: ${this.config.password.length}`);
-
     // Step 1: Sign in to get GNSESSIONID
     const signinUrl = `${catalogueURL}/api/user/signin`;
-    console.log(`[Auth] Signin URL: ${signinUrl}`);
-
     const formData = new URLSearchParams();
     formData.append("username", this.config.username);
     formData.append("password", this.config.password);
@@ -371,17 +276,8 @@ export class ToolHandlers {
         }
       );
     } catch (error: any) {
-      console.error(`[Auth] Signin failed:`, {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-      });
       throw new Error(`Authentication failed: ${error.message}`);
     }
-
-    console.log(`[Auth] Signin response status: ${signinResponse.status}`);
-    console.log(`[Auth] Signin response data:`, JSON.stringify(signinResponse.data).substring(0, 200));
-    console.log(`[Auth] Signin cookies:`, signinResponse.headers["set-cookie"]);
 
     let gnSessionId = "";
     let jsSessionId = "";
@@ -400,20 +296,15 @@ export class ToolHandlers {
       }
     }
 
-    // Step 2: Get JSESSIONID and XSRF-TOKEN if not already obtained
-    if (!jsSessionId || !xsrfToken) {
-      console.log(`[Auth] Fetching JSESSIONID/XSRF-TOKEN from /site/info...`);
-      const cookieForSiteInfo = gnSessionId ? `GNSESSIONID=${gnSessionId}` : "";
-
+    // Step 2: Get JSESSIONID if not already obtained
+    if (!jsSessionId) {
       const siteResponse = await axios.get(`${baseURL}/site/info`, {
         headers: {
           Accept: "application/json",
-          Cookie: cookieForSiteInfo,
+          Cookie: gnSessionId ? `GNSESSIONID=${gnSessionId}` : "",
         },
         timeout: 10000,
       });
-
-      console.log(`[Auth] Site info cookies:`, siteResponse.headers["set-cookie"]);
 
       const siteCookies = siteResponse.headers["set-cookie"] || [];
       for (const cookie of siteCookies) {
@@ -424,45 +315,6 @@ export class ToolHandlers {
           xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
         }
       }
-      console.log(`[Auth] After /site/info - JSESSIONID: ${jsSessionId ? "obtained" : "missing"}, XSRF-TOKEN: ${xsrfToken ? "obtained" : "missing"}`);
-    }
-
-    // Step 3: If still no XSRF token, try making a GET request to /me endpoint
-    if (!xsrfToken) {
-      console.log(`[Auth] XSRF-TOKEN still missing, trying /me endpoint...`);
-      const cookieForMe = [
-        jsSessionId ? `JSESSIONID=${jsSessionId}` : "",
-        gnSessionId ? `GNSESSIONID=${gnSessionId}` : "",
-      ].filter(Boolean).join("; ");
-
-      const meResponse = await axios.get(`${baseURL}/me`, {
-        headers: {
-          Accept: "application/json",
-          Cookie: cookieForMe,
-        },
-        timeout: 10000,
-      });
-
-      console.log(`[Auth] /me response data:`, JSON.stringify(meResponse.data).substring(0, 500));
-      console.log(`[Auth] /me cookies:`, meResponse.headers["set-cookie"]);
-
-      // Check cookies for XSRF token
-      const meCookies = meResponse.headers["set-cookie"] || [];
-      for (const cookie of meCookies) {
-        if (cookie.includes("XSRF-TOKEN=")) {
-          xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
-        }
-      }
-
-      // Some GeoNetwork instances return XSRF token in response body
-      if (!xsrfToken && meResponse.data && typeof meResponse.data === 'object') {
-        if (meResponse.data.csrf || meResponse.data.csrfToken || meResponse.data['X-XSRF-TOKEN']) {
-          xsrfToken = meResponse.data.csrf || meResponse.data.csrfToken || meResponse.data['X-XSRF-TOKEN'];
-          console.log(`[Auth] Found XSRF token in /me response body: ${xsrfToken}`);
-        }
-      }
-
-      console.log(`[Auth] After /me - XSRF-TOKEN: ${xsrfToken ? "obtained" : "missing"}`);
     }
 
     // Build cookie header
@@ -471,10 +323,6 @@ export class ToolHandlers {
     if (gnSessionId) cookieParts.push(`GNSESSIONID=${gnSessionId}`);
     if (xsrfToken) cookieParts.push(`XSRF-TOKEN=${xsrfToken}`);
     const cookieHeader = cookieParts.join("; ");
-
-    console.log(`[Auth] Final session state: JSESSIONID=${jsSessionId ? "yes" : "no"}, GNSESSIONID=${gnSessionId ? "yes" : "no"}, XSRF-TOKEN=${xsrfToken ? "yes" : "no"}`);
-    console.log(`[Auth] Cookie header: ${cookieHeader}`);
-    console.log(`[Auth] XSRF token value: ${xsrfToken}`);
 
     return { cookieHeader, xsrfToken, axios };
   }
@@ -954,8 +802,6 @@ export class ToolHandlers {
     const stats = fs.statSync(filePath);
     const filename = path.basename(filePath);
 
-    console.log(`[UploadFileToRecord] File size: ${stats.size} bytes`);
-
     // Get authenticated session (for cookies and XSRF token)
     const { cookieHeader, xsrfToken, axios } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
@@ -969,12 +815,7 @@ export class ToolHandlers {
       // Get form headers (includes Content-Type with boundary)
       const formHeaders = formData.getHeaders();
 
-      // Combine session cookies with Basic Auth for maximum compatibility
-      console.log(`[UploadFileToRecord] Using session cookies + Basic Auth`);
-      console.log(`[UploadFileToRecord] Request URL: ${baseURL}/records/${metadataUuid}/attachments?visibility=${visibility}&approved=${approved}`);
-      console.log(`[UploadFileToRecord] Content-Type:`, formHeaders['content-type']);
-      console.log(`[UploadFileToRecord] Has XSRF token: ${xsrfToken ? "yes" : "no"}`);
-
+      // GeoNetwork requires both session cookies AND Basic Auth for file uploads
       const response = await axios.post(
         `${baseURL}/records/${metadataUuid}/attachments`,
         formData,
@@ -995,8 +836,6 @@ export class ToolHandlers {
         }
       );
 
-      console.log(`[UploadFileToRecord] Response:`, response.status, JSON.stringify(response.data));
-
       return this.formatResponse({
         success: true,
         message: `File "${filename}" uploaded successfully to record ${metadataUuid}`,
@@ -1011,22 +850,16 @@ export class ToolHandlers {
       const errorData = error.response?.data;
       const errorStatus = error.response?.status;
 
-      console.log(`[UploadFileToRecord] Error status:`, errorStatus);
-      console.log(`[UploadFileToRecord] Error:`, errorData || error.message);
-
-      // Provide more helpful error messages
+      // Provide helpful error message for access denied
       if (errorStatus === 500 && errorData?.message === "Access Denied") {
         return {
           content: [
             {
               type: "text",
-              text: `Error: Access Denied (500). This typically means:\n\n` +
-                `1. The record may be in published/approved state and needs to be in draft mode first\n` +
-                `2. Your user account may need explicit editor permissions for this record's group\n` +
-                `3. The record may be owned by a different group\n\n` +
-                `Suggestion: Try using the duplicate_record tool first to create a draft copy, then upload attachments to the draft.\n\n` +
+              text: `Error: Access Denied. The record may be published/approved or you may not have edit permissions.\n\n` +
+                `Suggestion: Try using duplicate_record to create a draft copy first.\n\n` +
                 `Record UUID: ${metadataUuid}\n` +
-                `Original error: ${JSON.stringify(errorData, null, 2)}`,
+                `Error: ${JSON.stringify(errorData, null, 2)}`,
             },
           ],
           isError: true,

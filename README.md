@@ -38,6 +38,36 @@ This MCP server provides 20 tools for interacting with the EEA GeoNetwork Catalo
 
 ## Installation
 
+### Option 1: Docker (Recommended)
+
+The easiest way to run the server is using Docker:
+
+```bash
+# Build and start the container
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f
+
+# Stop the container
+docker-compose down
+```
+
+The server will be available at `http://localhost:3001`
+
+**Environment Variables:**
+You can customize the configuration by creating a `.env` file or editing the `docker-compose.yml`:
+
+```yaml
+environment:
+  - PORT=3001
+  - BASE_URL=https://galliwasp.eea.europa.eu/catalogue/srv/api
+  - CATALOGUE_USERNAME=your_username
+  - CATALOGUE_PASSWORD=your_password
+```
+
+### Option 2: Manual Installation
+
 1. Install dependencies:
 ```bash
 npm install

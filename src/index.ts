@@ -64,11 +64,11 @@ const upload = multer({
 const swaggerSpec = {
   openapi: "3.0.0",
   info: {
-    title: "EEA SDI Catalogue MCP Server - Upload Basket API",
+    title: "EEA GeoNetwork MCP Server - Upload Basket API",
     version: "2.0.0",
-    description: "Upload files to the basket for use with the EEA SDI Catalogue. Upload files here, then use the returned URL with the upload_resource_from_url MCP tool to attach them to metadata records.",
+    description: "Upload files to the basket for use with the EEA GeoNetwork Catalogue. Upload files here, then use the returned URL with the upload_resource_from_url MCP tool to attach them to metadata records.",
     contact: {
-      name: "EEA SDI Team",
+      name: "EEA GeoNetwork Team",
     },
   },
   servers: [
@@ -199,7 +199,7 @@ const swaggerSpec = {
                   type: "object",
                   properties: {
                     status: { type: "string", example: "ok" },
-                    service: { type: "string", example: "eea-sdi-catalogue-mcp" },
+                    service: { type: "string", example: "eea-geonetwork-mcp" },
                   },
                 },
               },
@@ -221,7 +221,7 @@ const swaggerSpec = {
   ],
 };
 
-class SdiCatalogueServer {
+class GeoNetworkMcpServer {
   private server: Server;
   private app: express.Application;
   private handlers: ToolHandlers;
@@ -229,7 +229,7 @@ class SdiCatalogueServer {
   constructor() {
     this.server = new Server(
       {
-        name: "eea-sdi-catalogue",
+        name: "eea-geonetwork",
         version: "2.0.0",
       },
       {
@@ -326,21 +326,21 @@ class SdiCatalogueServer {
   private setupHTTPRoutes(): void {
     // Swagger UI documentation
     this.app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-      customSiteTitle: "EEA SDI Upload Basket API",
+      customSiteTitle: "EEA GeoNetwork Upload Basket API",
       customCss: '.swagger-ui .topbar { display: none }',
     }));
 
     // Health check endpoint
     this.app.get("/health", (_req, res) => {
-      res.json({ status: "ok", service: "eea-sdi-catalogue-mcp" });
+      res.json({ status: "ok", service: "eea-geonetwork-mcp" });
     });
 
     // Browser-friendly info page
     this.app.get("/info", (_req, res) => {
       res.json({
-        name: "EEA SDI Catalogue MCP Server",
+        name: "EEA GeoNetwork MCP Server",
         version: "2.0.0",
-        description: "MCP server for EEA SDI Catalogue API (GeoNetwork 4.4.9)",
+        description: "MCP server for EEA GeoNetwork Catalogue API (GeoNetwork 4.4.9)",
         transport: "Streamable HTTP",
         endpoints: {
           mcp: "POST /",
@@ -484,7 +484,7 @@ class SdiCatalogueServer {
 
   async run(): Promise<void> {
     this.app.listen(CONFIG.PORT, () => {
-      console.log(`EEA SDI Catalogue MCP Server running on http://localhost:${CONFIG.PORT}`);
+      console.log(`EEA GeoNetwork MCP Server running on http://localhost:${CONFIG.PORT}`);
       console.log(`\nEndpoints:`);
       console.log(`  GET  /health          - Health check`);
       console.log(`  GET  /info            - Server information`);
@@ -502,5 +502,5 @@ class SdiCatalogueServer {
   }
 }
 
-const server = new SdiCatalogueServer();
+const server = new GeoNetworkMcpServer();
 server.run().catch(console.error);

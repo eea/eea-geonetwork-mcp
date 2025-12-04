@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an MCP (Model Context Protocol) server that provides tools to interact with the EEA SDI Catalogue API (GeoNetwork 4.4.9). The server exposes 12 tools for searching, retrieving, duplicating, and exporting geospatial metadata records from the European Environment Agency's Spatial Data Infrastructure catalogue.
+This is an MCP (Model Context Protocol) server that provides tools to interact with the EEA GeoNetwork Catalogue API (GeoNetwork 4.4.9). The server exposes 20 tools for searching, retrieving, duplicating, and exporting geospatial metadata records from the European Environment Agency's GeoNetwork catalogue.
 
 ## Development Commands
 
@@ -48,18 +48,18 @@ The server uses the official MCP protocol via Streamable HTTP transport (standar
 - Centralized error handling with formatted error messages
 
 **src/tools.ts** - Tool definitions:
-- Array of 12 tool definitions with JSON schemas
+- Array of 20 tool definitions with JSON schemas
 - Each tool specifies name, description, and input schema
 
 **src/handlers.ts** - Tool implementation handlers:
 - `ToolHandlers` class with Axios instance
 - `formatResponse()` helper for consistent response formatting
-- 12 async handler methods with explicit return types
+- 20 async handler methods with explicit return types
 - Simplified parameter building using object spread with conditionals
 
 **src/types.ts** - TypeScript interfaces:
 - `ToolResponse` interface for handler return values
-- Argument interfaces for all 12 tools (SearchRecordsArgs, GetRecordArgs, etc.)
+- Argument interfaces for all 20 tools (SearchRecordsArgs, GetRecordArgs, etc.)
 
 ### API Integration
 

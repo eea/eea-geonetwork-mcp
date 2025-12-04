@@ -1,10 +1,10 @@
-# EEA SDI Catalogue MCP Server
+# EEA GeoNetwork MCP Server
 
-A Model Context Protocol (MCP) server that provides tools to interact with the European Environment Agency (EEA) Spatial Data Infrastructure (SDI) Catalogue API, powered by GeoNetwork 4.4.9.
+A Model Context Protocol (MCP) server that provides tools to interact with the European Environment Agency (EEA) GeoNetwork Catalogue API (GeoNetwork 4.4.9).
 
 ## Features
 
-This MCP server provides 20 tools for interacting with the EEA SDI Catalogue:
+This MCP server provides 20 tools for interacting with the EEA GeoNetwork Catalogue:
 
 ### Search & Discovery
 - **search_records** - Search for metadata records with full Elasticsearch query support
@@ -92,7 +92,7 @@ The server will start on port 3001 (or the port specified in the `PORT` environm
 # Check if server is running
 curl http://localhost:3001/health
 
-# Should return: {"status":"ok","service":"eea-sdi-catalogue-mcp"}
+# Should return: {"status":"ok","service":"eea-geonetwork-mcp"}
 
 # Upload a file to the basket
 curl -X POST http://localhost:3001/upload -F "file=@myfile.pdf"
@@ -139,7 +139,7 @@ Add to your Claude Desktop configuration file:
 ```json
 {
   "mcpServers": {
-    "eea-sdi-catalogue": {
+    "eea-geonetwork": {
       "command": "node",
       "args": ["C:\\Users\\dubos\\_Projects\\EEA_sdi_mcp\\dist\\index.js"]
     }

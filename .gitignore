@@ -6,3 +6,5 @@ dist/
 *.tsbuildinfo
 uploads/
 CLAUDE.md
+.claude/
+.vscode/

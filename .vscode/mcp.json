@@ -1,9 +1,0 @@
-{
-	"servers": {
-		"eea-geonetwork-mcp": {
-			"url": "http://localhost:3001/",
-			"type": "sse"
-		}
-	},
-	"inputs": []
-}

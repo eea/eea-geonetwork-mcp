@@ -1,6 +1,6 @@
 {
 	"servers": {
-		"my-mcp-server-117132d1": {
+		"eea-geonetwork-mcp": {
 			"url": "http://localhost:3001/",
 			"type": "sse"
 		}

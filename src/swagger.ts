@@ -1,0 +1,192 @@
+import { Application } from "express";
+import swaggerUi from "swagger-ui-express";
+
+const baseSwaggerSpec = {
+  openapi: "3.0.0",
+  info: {
+    title: "EEA GeoNetwork MCP Server - Upload Basket API",
+    version: "2.0.0",
+    description:
+      "Upload files to the basket for use with the EEA GeoNetwork Catalogue. Upload files here, then use the returned URL with the upload_resource_from_url MCP tool to attach them to metadata records.",
+    contact: {
+      name: "EEA GeoNetwork Team",
+    },
+  },
+  paths: {
+    "/upload": {
+      post: {
+        summary: "Upload file to basket",
+        description:
+          "Upload a file to the temporary upload basket. Returns a URL that can be used with the upload_resource_from_url MCP tool.",
+        tags: ["Upload Basket"],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  file: {
+                    type: "string",
+                    format: "binary",
+                    description: "File to upload (max 100MB)",
+                  },
+                },
+                required: ["file"],
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "File uploaded successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    message: {
+                      type: "string",
+                      example: "File uploaded successfully",
+                    },
+                    file: {
+                      type: "object",
+                      properties: {
+                        originalName: {
+                          type: "string",
+                          example: "document.pdf",
+                        },
+                        filename: {
+                          type: "string",
+                          example: "document-1234567890.pdf",
+                        },
+                        size: { type: "number", example: 1024 },
+                        mimetype: { type: "string", example: "application/pdf" },
+                        url: {
+                          type: "string",
+                          example:
+                            "http://localhost:3001/uploads/document-1234567890.pdf",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "Bad request - no file uploaded",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    error: { type: "string", example: "No file uploaded" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/uploads/{filename}": {
+      get: {
+        summary: "Download uploaded file",
+        description: "Retrieve a previously uploaded file from the basket",
+        tags: ["Upload Basket"],
+        parameters: [
+          {
+            name: "filename",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Filename returned from upload",
+            example: "document-1234567890.pdf",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "File content",
+            content: {
+              "application/octet-stream": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                },
+              },
+            },
+          },
+          "404": {
+            description: "File not found",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    error: { type: "string", example: "File not found" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/health": {
+      get: {
+        summary: "Health check",
+        description: "Check if the server is running",
+        tags: ["System"],
+        responses: {
+          "200": {
+            description: "Server is healthy",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", example: "ok" },
+                    service: { type: "string", example: "eea-geonetwork-mcp" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  tags: [
+    {
+      name: "Upload Basket",
+      description: "Temporary file storage for metadata record attachments",
+    },
+    {
+      name: "System",
+      description: "System health and information endpoints",
+    },
+  ],
+} as const;
+
+export const createSwaggerSpec = (port: number) => ({
+  ...baseSwaggerSpec,
+  servers: [
+    {
+      url: `http://localhost:${port}`,
+      description: "Local development server",
+    },
+  ],
+});
+
+export const registerSwaggerDocs = (app: Application, spec: object) => {
+  app.use(
+    "/api-docs",
+    swaggerUi.serve,
+    swaggerUi.setup(spec, {
+      customSiteTitle: "EEA GeoNetwork Upload Basket API",
+      customCss: ".swagger-ui .topbar { display: none }",
+    })
+  );
+};

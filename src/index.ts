@@ -31,11 +31,49 @@ const CONFIG = {
   // Upload basket configuration
   UPLOAD_DIR: process.env.UPLOAD_DIR || "./uploads",
   MAX_FILE_SIZE: parseInt(process.env.MAX_FILE_SIZE || "104857600", 10), // 100MB default
+  PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL || "",
 } as const;
 
-const swaggerSpec = createSwaggerSpec(
-  typeof CONFIG.PORT === "string" ? parseInt(CONFIG.PORT, 10) || 3001 : CONFIG.PORT
-);
+const PORT_NUMBER =
+  typeof CONFIG.PORT === "string"
+    ? parseInt(CONFIG.PORT, 10) || 3001
+    : CONFIG.PORT;
+const DEFAULT_BASE_URL = `http://localhost:${PORT_NUMBER}`;
+
+const pickHeaderValue = (value?: string | string[]) =>
+  Array.isArray(value) ? value[0] : value;
+
+const getPublicBaseUrl = (req?: Request) => {
+  if (CONFIG.PUBLIC_BASE_URL) {
+    return CONFIG.PUBLIC_BASE_URL.replace(/\/$/, "");
+  }
+
+  if (req) {
+    const forwardedProto = pickHeaderValue(req.headers["x-forwarded-proto"]);
+    const forwardedHost = pickHeaderValue(req.headers["x-forwarded-host"]);
+
+    const protocol =
+      forwardedProto?.split(",")[0]?.trim() || req.protocol || "http";
+    const host = forwardedHost || req.get("host");
+
+    if (protocol && host) {
+      return `${protocol}://${host}`;
+    }
+  }
+
+  return DEFAULT_BASE_URL;
+};
+
+const buildAbsoluteUrl = (req: Request | undefined, pathname: string) => {
+  const base = getPublicBaseUrl(req);
+  const normalizedBase = base.endsWith("/") ? base : `${base}/`;
+  const normalizedPath = pathname.startsWith("/")
+    ? pathname.slice(1)
+    : pathname;
+  return new URL(normalizedPath, normalizedBase).toString();
+};
+
+const swaggerSpec = createSwaggerSpec(getPublicBaseUrl());
 
 // Ensure upload directory exists
 if (!fs.existsSync(CONFIG.UPLOAD_DIR)) {
@@ -201,7 +239,7 @@ class GeoNetworkMcpServer {
           return res.status(400).json({ error: "No file uploaded" });
         }
 
-        const fileUrl = `http://localhost:${CONFIG.PORT}/uploads/${req.file.filename}`;
+        const fileUrl = buildAbsoluteUrl(req, `/uploads/${req.file.filename}`);
 
         console.log(`[Upload] File uploaded: ${req.file.originalname} -> ${req.file.filename}`);
         console.log(`[Upload] Accessible at: ${fileUrl}`);
@@ -323,21 +361,22 @@ class GeoNetworkMcpServer {
   }
 
   async run(): Promise<void> {
-    this.app.listen(CONFIG.PORT, () => {
-      console.log(`EEA GeoNetwork MCP Server running on http://localhost:${CONFIG.PORT}`);
+    this.app.listen(PORT_NUMBER, () => {
+      const publicBaseUrl = getPublicBaseUrl();
+      console.log(`EEA GeoNetwork MCP Server running on ${publicBaseUrl}`);
       console.log(`\nEndpoints:`);
-      console.log(`  GET  /health          - Health check`);
-      console.log(`  GET  /info            - Server information`);
-      console.log(`  GET  /api-docs        - Swagger UI (file upload interface)`);
-      console.log(`  POST /upload          - Upload file to basket`);
-      console.log(`  GET  /uploads/:file   - Retrieve uploaded file`);
-      console.log(`  POST /                - MCP messages`);
-      console.log(`  GET  /                - MCP SSE stream`);
+      console.log(`  GET  ${buildAbsoluteUrl(undefined, "/health")}          - Health check`);
+      console.log(`  GET  ${buildAbsoluteUrl(undefined, "/info")}            - Server information`);
+      console.log(`  GET  ${buildAbsoluteUrl(undefined, "/api-docs")}        - Swagger UI (file upload interface)`);
+      console.log(`  POST ${buildAbsoluteUrl(undefined, "/upload")}          - Upload file to basket`);
+      console.log(`  GET  ${buildAbsoluteUrl(undefined, "/uploads/:file")}   - Retrieve uploaded file`);
+      console.log(`  POST ${buildAbsoluteUrl(undefined, "/")}                - MCP messages`);
+      console.log(`  GET  ${buildAbsoluteUrl(undefined, "/")}                - MCP SSE stream`);
       console.log(`\nUpload basket:`);
       console.log(`  Directory: ${CONFIG.UPLOAD_DIR}`);
       console.log(`  Max file size: ${(CONFIG.MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB`);
-      console.log(`  Swagger UI: http://localhost:${CONFIG.PORT}/api-docs`);
-      console.log(`\nConnect MCP client to: http://localhost:${CONFIG.PORT}/`);
+      console.log(`  Swagger UI: ${buildAbsoluteUrl(undefined, "/api-docs")}`);
+      console.log(`\nConnect MCP client to: ${buildAbsoluteUrl(undefined, "/")}`);
     });
   }
 }

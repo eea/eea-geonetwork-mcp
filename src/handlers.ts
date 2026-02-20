@@ -1,4 +1,4 @@
-import { AxiosInstance } from "axios";
+import axios, { AxiosInstance } from "axios";
 import fs from "fs";
 import FormData from "form-data";
 import path from "path";
@@ -24,8 +24,16 @@ import {
   HandlerConfig,
 } from "./types.js";
 
+type AuthSessionCache = {
+  cookieHeader: string;
+  xsrfToken: string;
+  expiresAt: number;
+};
+
 export class ToolHandlers {
   private config: HandlerConfig;
+  private authSession?: AuthSessionCache;
+  private static readonly SESSION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(private axiosInstance: AxiosInstance, config: HandlerConfig) {
     this.config = config;
@@ -39,6 +47,22 @@ export class ToolHandlers {
           text: isRaw ? data : JSON.stringify(data, null, 2),
         },
       ],
+    };
+  }
+
+  private hasCredentials(): boolean {
+    return Boolean(this.config.username && this.config.password);
+  }
+
+  private authRequiredResponse(action: string): ToolResponse {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Error: Authentication required for ${action}. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.`,
+        },
+      ],
+      isError: true,
     };
   }
 
@@ -169,17 +193,8 @@ export class ToolHandlers {
   }
 
   async duplicateRecord(args: DuplicateRecordArgs): Promise<ToolResponse> {
-    // Check if authentication is configured
-    if (!this.config.username || !this.config.password) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Error: Authentication required for duplicate_record. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
-          },
-        ],
-        isError: true,
-      };
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("duplicate_record");
     }
 
     const {
@@ -198,8 +213,7 @@ export class ToolHandlers {
       ...(!hasCategoryOfSource && { hasCategoryOfSource: false }),
     };
 
-    // Get authenticated session
-    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     try {
@@ -247,12 +261,31 @@ export class ToolHandlers {
   }
 
   /**
-   * Helper method to authenticate and get session cookies
+   * Helper method to authenticate and get session cookies with caching
    */
-  private async getAuthenticatedSession(): Promise<{ cookieHeader: string; xsrfToken: string; axios: any }> {
-    const axios = (await import("axios")).default;
-    const baseURL = this.axiosInstance.defaults.baseURL || "";
-    const catalogueURL = baseURL.replace("/srv/api", "");
+  private async getAuthenticatedSession(forceRefresh = false): Promise<{
+    cookieHeader: string;
+    xsrfToken: string;
+  }> {
+    if (!this.hasCredentials()) {
+      throw new Error("Authentication credentials are not configured.");
+    }
+
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      this.authSession &&
+      this.authSession.expiresAt > now
+    ) {
+      const { cookieHeader, xsrfToken } = this.authSession;
+      return { cookieHeader, xsrfToken };
+    }
+
+    const baseURL = this.axiosInstance.defaults.baseURL;
+    if (!baseURL) {
+      throw new Error("BASE_URL is not configured for GeoNetwork requests.");
+    }
+    const catalogueURL = baseURL.replace(/\/srv\/api\/?$/, "");
 
     // Step 1: Sign in to get GNSESSIONID
     const signinUrl = `${catalogueURL}/api/user/signin`;
@@ -262,20 +295,17 @@ export class ToolHandlers {
 
     let signinResponse;
     try {
-      signinResponse = await axios.post(
-        signinUrl,
-        formData.toString(),
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json, text/html",
-          },
-          timeout: 10000,
-          maxRedirects: 0,
-          validateStatus: (status: number) => status < 400 || status === 302,
-        }
-      );
+      signinResponse = await axios.post(signinUrl, formData.toString(), {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json, text/html",
+        },
+        timeout: 10000,
+        maxRedirects: 0,
+        validateStatus: (status: number) => status < 400 || status === 302,
+      });
     } catch (error: any) {
+      this.authSession = undefined;
       throw new Error(`Authentication failed: ${error.message}`);
     }
 
@@ -324,21 +354,18 @@ export class ToolHandlers {
     if (xsrfToken) cookieParts.push(`XSRF-TOKEN=${xsrfToken}`);
     const cookieHeader = cookieParts.join("; ");
 
-    return { cookieHeader, xsrfToken, axios };
+    this.authSession = {
+      cookieHeader,
+      xsrfToken,
+      expiresAt: now + ToolHandlers.SESSION_CACHE_TTL_MS,
+    };
+
+    return { cookieHeader, xsrfToken };
   }
 
   async updateRecord(args: UpdateRecordArgs): Promise<ToolResponse> {
-    // Check if authentication is configured
-    if (!this.config.username || !this.config.password) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Error: Authentication required for update_record. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
-          },
-        ],
-        isError: true,
-      };
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("update_record");
     }
 
     const {
@@ -351,8 +378,7 @@ export class ToolHandlers {
 
     console.log(`[UpdateRecord] UUID: ${uuid}, XPath: ${xpath}, Operation: ${operation}`);
 
-    // Get authenticated session
-    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     // Build the batch editing request body
@@ -443,9 +469,9 @@ export class ToolHandlers {
         console.log(`[GetRecordById] Not found in search, trying direct API call with auth`);
 
         // Check if we have credentials
-        if (this.config.username && this.config.password) {
+        if (this.hasCredentials()) {
           try {
-            const { cookieHeader, axios } = await this.getAuthenticatedSession();
+            const { cookieHeader } = await this.getAuthenticatedSession();
             const baseURL = this.axiosInstance.defaults.baseURL || "";
 
             const directResponse = await axios.get(`${baseURL}/records/${id}`, {
@@ -502,25 +528,15 @@ export class ToolHandlers {
   }
 
   async updateRecordTitle(args: UpdateRecordTitleArgs): Promise<ToolResponse> {
-    // Check if authentication is configured
-    if (!this.config.username || !this.config.password) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Error: Authentication required for update_record_title. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
-          },
-        ],
-        isError: true,
-      };
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("update_record_title");
     }
 
     const { uuid, title } = args;
 
     console.log(`[UpdateRecordTitle] UUID: ${uuid}, New Title: ${title}`);
 
-    // Get authenticated session
-    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     // First, detect the schema by fetching the record's XML
@@ -598,25 +614,15 @@ export class ToolHandlers {
   }
 
   async addRecordTags(args: AddRecordTagsArgs): Promise<ToolResponse> {
-    // Check if authentication is configured
-    if (!this.config.username || !this.config.password) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Error: Authentication required for add_record_tags. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
-          },
-        ],
-        isError: true,
-      };
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("add_record_tags");
     }
 
     const { uuid, tags } = args;
 
     console.log(`[AddRecordTags] UUID: ${uuid}, Tags: ${tags.join(", ")}`);
 
-    // Get authenticated session
-    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     try {
@@ -649,25 +655,15 @@ export class ToolHandlers {
   }
 
   async deleteRecordTags(args: DeleteRecordTagsArgs): Promise<ToolResponse> {
-    // Check if authentication is configured
-    if (!this.config.username || !this.config.password) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Error: Authentication required for delete_record_tags. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
-          },
-        ],
-        isError: true,
-      };
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("delete_record_tags");
     }
 
     const { uuid, tags } = args;
 
     console.log(`[DeleteRecordTags] UUID: ${uuid}, Tags: ${tags.join(", ")}`);
 
-    // Get authenticated session
-    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     try {
@@ -720,25 +716,15 @@ export class ToolHandlers {
   }
 
   async deleteAttachment(args: DeleteAttachmentArgs): Promise<ToolResponse> {
-    // Check if authentication is configured
-    if (!this.config.username || !this.config.password) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Error: Authentication required for delete_attachment. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
-          },
-        ],
-        isError: true,
-      };
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("delete_attachment");
     }
 
     const { metadataUuid, resourceId, approved = false } = args;
 
     console.log(`[DeleteAttachment] UUID: ${metadataUuid}, Resource ID: ${resourceId}`);
 
-    // Get authenticated session
-    const { cookieHeader, axios } = await this.getAuthenticatedSession();
+    const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     try {
@@ -768,17 +754,8 @@ export class ToolHandlers {
   }
 
   async uploadFileToRecord(args: UploadFileToRecordArgs): Promise<ToolResponse> {
-    // Check if authentication is configured
-    if (!this.config.username || !this.config.password) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Error: Authentication required for upload_file_to_record. Please set CATALOGUE_USERNAME and CATALOGUE_PASSWORD in your .env file.",
-          },
-        ],
-        isError: true,
-      };
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("upload_file_to_record");
     }
 
     const { metadataUuid, filePath, visibility = "PUBLIC", approved = false } = args;
@@ -802,8 +779,7 @@ export class ToolHandlers {
     const stats = fs.statSync(filePath);
     const filename = path.basename(filePath);
 
-    // Get authenticated session (for cookies and XSRF token)
-    const { cookieHeader, xsrfToken, axios } = await this.getAuthenticatedSession();
+    const { cookieHeader, xsrfToken } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     try {

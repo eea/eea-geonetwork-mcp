@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 # Upgrade npm to fix CVE in bundled tar (<=7.5.3)
 RUN npm install -g npm@latest
@@ -19,7 +19,7 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
+FROM node:20-slim
 
 # Upgrade npm to fix CVE in bundled tar (<=7.5.3)
 RUN npm install -g npm@latest

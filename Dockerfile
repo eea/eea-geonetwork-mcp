@@ -1,6 +1,9 @@
 # Build stage
 FROM node:20-alpine AS builder
 
+# Upgrade npm to fix CVE in bundled tar (<=7.5.3)
+RUN npm install -g npm@latest
+
 WORKDIR /app
 
 # Copy package files
@@ -17,6 +20,9 @@ RUN npm run build
 
 # Production stage
 FROM node:20-alpine
+
+# Upgrade npm to fix CVE in bundled tar (<=7.5.3)
+RUN npm install -g npm@latest
 
 WORKDIR /app
 

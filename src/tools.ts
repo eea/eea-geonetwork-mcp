@@ -57,6 +57,20 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "get_record_summary",
+    description: "Get a concise, human-readable summary of a metadata record (title, abstract, keywords, extent, contacts, links). Use this instead of get_record when you only need an overview — the response is much smaller and easier to work with.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        uuid: {
+          type: "string",
+          description: "The UUID of the metadata record",
+        },
+      },
+      required: ["uuid"],
+    },
+  },
+  {
     name: "get_record_formatters",
     description: "Get available formatters (export formats) for a metadata record",
     inputSchema: {

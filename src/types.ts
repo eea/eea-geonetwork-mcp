@@ -20,6 +20,10 @@ export interface GetRecordArgs {
   approved?: boolean;
 }
 
+export interface GetRecordSummaryArgs {
+  uuid: string;
+}
+
 export interface GetRecordFormattersArgs {
   uuid: string;
 }

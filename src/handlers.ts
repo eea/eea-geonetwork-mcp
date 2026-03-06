@@ -5,6 +5,7 @@ import path from "path";
 import {
   SearchRecordsArgs,
   GetRecordArgs,
+  GetRecordSummaryArgs,
   GetRecordFormattersArgs,
   ExportRecordArgs,
   ListGroupsArgs,
@@ -24,16 +25,8 @@ import {
   HandlerConfig,
 } from "./types.js";
 
-type AuthSessionCache = {
-  cookieHeader: string;
-  xsrfToken: string;
-  expiresAt: number;
-};
-
 export class ToolHandlers {
   private config: HandlerConfig;
-  private authSession?: AuthSessionCache;
-  private static readonly SESSION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(private axiosInstance: AxiosInstance, config: HandlerConfig) {
     this.config = config;
@@ -106,6 +99,86 @@ export class ToolHandlers {
     });
 
     return this.formatResponse(response.data);
+  }
+
+  async getRecordSummary(args: GetRecordSummaryArgs): Promise<ToolResponse> {
+    const { uuid } = args;
+
+    const response = await this.axiosInstance.post("/search/records/_search", {
+      query: { term: { uuid } },
+      size: 1,
+    });
+
+    const hit = response.data?.hits?.hits?.[0]?._source;
+    if (!hit) {
+      return {
+        content: [{ type: "text", text: `No record found with UUID: ${uuid}` }],
+        isError: true,
+      };
+    }
+
+    // Extract a flat, human-readable summary from the Elasticsearch document
+    const pick = (obj: any, ...paths: string[]): any => {
+      for (const p of paths) {
+        const val = p.split(".").reduce((o, k) => o?.[k], obj);
+        if (val !== undefined && val !== null && val !== "") return val;
+      }
+      return undefined;
+    };
+
+    const summary: Record<string, any> = {
+      uuid: hit.uuid,
+      title: pick(hit, "resourceTitleObject.default", "resourceTitle"),
+      abstract: pick(hit, "resourceAbstractObject.default", "resourceAbstract"),
+      type: hit.resourceType?.[0] ?? hit["th_hierarchylevel"]?.[0] ?? hit.type,
+      status: hit.cl_status?.[0]?.default ?? hit.status,
+      language: hit.mainLanguage ?? hit.language,
+      created: hit.createDate,
+      updated: hit.changeDate,
+      published: hit.isPublishedToAll ?? false,
+    };
+
+    // Keywords
+    const keywords: string[] = [];
+    if (Array.isArray(hit.tag)) {
+      hit.tag.forEach((t: any) => {
+        const label = typeof t === "string" ? t : (t.default ?? t.key);
+        if (label) keywords.push(label);
+      });
+    }
+    if (keywords.length) summary.keywords = keywords;
+
+    // Geographic extent
+    if (hit.geom?.coordinates || hit.bbox) {
+      const bbox = hit.bbox ?? hit.geom?.bbox;
+      if (bbox) summary.extent = { bbox };
+    } else if (hit.location) {
+      summary.extent = { location: hit.location };
+    }
+
+    // Contacts
+    if (Array.isArray(hit.contact) && hit.contact.length > 0) {
+      summary.contacts = hit.contact.slice(0, 5).map((c: any) => ({
+        name: c.individual ?? c.organisation ?? c.organisationObject?.default,
+        role: c.role,
+        email: c.email,
+      })).filter((c: any) => c.name || c.email);
+    }
+
+    // Online resources / links
+    if (Array.isArray(hit.link) && hit.link.length > 0) {
+      summary.links = hit.link.slice(0, 10).map((l: any) => ({
+        name: l.nameObject?.default ?? l.name,
+        url: l.url ?? l.urlObject?.default,
+        protocol: l.protocol,
+        description: l.descriptionObject?.default ?? l.description,
+      })).filter((l: any) => l.url);
+    }
+
+    // Remove undefined values
+    Object.keys(summary).forEach(k => summary[k] === undefined && delete summary[k]);
+
+    return this.formatResponse(summary);
   }
 
   async getRecordFormatters(args: GetRecordFormattersArgs): Promise<ToolResponse> {
@@ -230,20 +303,33 @@ export class ToolHandlers {
       let newUuid = duplicateResult.uuid || duplicateResult.metadataUuid;
       const newId = duplicateResult.id || duplicateResult.metadataId || duplicateResult;
 
-      // If we got an ID but no UUID, try to look it up
+      // If we got an ID but no UUID, fetch the record directly via the API
       if (!newUuid && newId && typeof newId === "number") {
+        // Try direct API call first (most reliable, works immediately after creation)
         try {
-          const searchBody = {
-            query: { term: { _id: newId.toString() } },
-            size: 1,
-          };
-          const searchResponse = await this.axiosInstance.post("/search/records/_search", searchBody);
-          const hits = searchResponse.data.hits?.hits || [];
-          if (hits.length > 0) {
-            newUuid = hits[0]._source?.uuid || hits[0]._id;
+          const recordResponse = await axios.get(`${baseURL}/records/${newId}`, {
+            headers: {
+              Cookie: cookieHeader,
+              Accept: "application/json",
+            },
+          });
+          newUuid = recordResponse.data?.uuid || recordResponse.data?.metadataIdentifier;
+          console.log(`[Duplicate] Resolved UUID via direct API: ${newUuid}`);
+        } catch {
+          // Fall back to Elasticsearch search (may lag behind by a few seconds)
+          try {
+            const searchResponse = await this.axiosInstance.post("/search/records/_search", {
+              query: { term: { _id: newId.toString() } },
+              size: 1,
+            });
+            const hits = searchResponse.data.hits?.hits || [];
+            if (hits.length > 0) {
+              newUuid = hits[0]._source?.uuid || hits[0]._id;
+              console.log(`[Duplicate] Resolved UUID via Elasticsearch: ${newUuid}`);
+            }
+          } catch {
+            // UUID lookup failed, return with ID only
           }
-        } catch (lookupError) {
-          // UUID lookup failed, continue with ID only
         }
       }
 
@@ -253,7 +339,6 @@ export class ToolHandlers {
         newId,
         newUuid,
         sourceUuid: metadataUuid,
-        rawResponse: duplicateResult,
       });
     } catch (error: any) {
       throw error;
@@ -261,9 +346,10 @@ export class ToolHandlers {
   }
 
   /**
-   * Helper method to authenticate and get session cookies with caching
+   * Helper method to authenticate and get session cookies.
+   * Tries signin first, then falls back to /site/info and /me to obtain JSESSIONID + XSRF-TOKEN.
    */
-  private async getAuthenticatedSession(forceRefresh = false): Promise<{
+  private async getAuthenticatedSession(): Promise<{
     cookieHeader: string;
     xsrfToken: string;
   }> {
@@ -271,31 +357,23 @@ export class ToolHandlers {
       throw new Error("Authentication credentials are not configured.");
     }
 
-    const now = Date.now();
-    if (
-      !forceRefresh &&
-      this.authSession &&
-      this.authSession.expiresAt > now
-    ) {
-      const { cookieHeader, xsrfToken } = this.authSession;
-      return { cookieHeader, xsrfToken };
-    }
+    const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const catalogueURL = baseURL.replace("/srv/api", "");
 
-    const baseURL = this.axiosInstance.defaults.baseURL;
-    if (!baseURL) {
-      throw new Error("BASE_URL is not configured for GeoNetwork requests.");
-    }
-    const catalogueURL = baseURL.replace(/\/srv\/api\/?$/, "");
+    let gnSessionId = "";
+    let jsSessionId = "";
+    let xsrfToken = "";
 
-    // Step 1: Sign in to get GNSESSIONID
+    // Step 1: Sign in to get session cookies
     const signinUrl = `${catalogueURL}/api/user/signin`;
+    console.log(`[Auth] Signing in at: ${signinUrl}`);
+
     const formData = new URLSearchParams();
     formData.append("username", this.config.username);
     formData.append("password", this.config.password);
 
-    let signinResponse;
     try {
-      signinResponse = await axios.post(signinUrl, formData.toString(), {
+      const signinResponse = await axios.post(signinUrl, formData.toString(), {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           Accept: "application/json, text/html",
@@ -304,62 +382,73 @@ export class ToolHandlers {
         maxRedirects: 0,
         validateStatus: (status: number) => status < 400 || status === 302,
       });
+      console.log(`[Auth] Signin → ${signinResponse.status}, Location: ${signinResponse.headers["location"] || "none"}`);
+      console.log(`[Auth] Signin cookies: ${JSON.stringify(signinResponse.headers["set-cookie"])}`);
+      for (const cookie of signinResponse.headers["set-cookie"] || []) {
+        if (cookie.includes("GNSESSIONID=")) gnSessionId = cookie.split("GNSESSIONID=")[1].split(";")[0];
+        if (cookie.includes("JSESSIONID=")) jsSessionId = cookie.split("JSESSIONID=")[1].split(";")[0];
+        if (cookie.includes("XSRF-TOKEN=")) xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
+      }
     } catch (error: any) {
-      this.authSession = undefined;
-      throw new Error(`Authentication failed: ${error.message}`);
+      console.log(`[Auth] Signin failed, trying fallback: ${error.message}`);
     }
 
-    let gnSessionId = "";
-    let jsSessionId = "";
-    let xsrfToken = "";
-    const signinCookies = signinResponse.headers["set-cookie"] || [];
-
-    for (const cookie of signinCookies) {
-      if (cookie.includes("GNSESSIONID=")) {
-        gnSessionId = cookie.split("GNSESSIONID=")[1].split(";")[0];
-      }
-      if (cookie.includes("JSESSIONID=")) {
-        jsSessionId = cookie.split("JSESSIONID=")[1].split(";")[0];
-      }
-      if (cookie.includes("XSRF-TOKEN=")) {
-        xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
-      }
-    }
-
-    // Step 2: Get JSESSIONID if not already obtained
-    if (!jsSessionId) {
-      const siteResponse = await axios.get(`${baseURL}/site/info`, {
-        headers: {
-          Accept: "application/json",
-          Cookie: gnSessionId ? `GNSESSIONID=${gnSessionId}` : "",
-        },
-        timeout: 10000,
-      });
-
-      const siteCookies = siteResponse.headers["set-cookie"] || [];
-      for (const cookie of siteCookies) {
-        if (cookie.includes("JSESSIONID=")) {
-          jsSessionId = cookie.split("JSESSIONID=")[1].split(";")[0];
+    // Step 2: Fallback — GET /site/info to obtain JSESSIONID + XSRF-TOKEN
+    if (!jsSessionId || !xsrfToken) {
+      console.log(`[Auth] Fetching session via /site/info...`);
+      try {
+        const siteResponse = await axios.get(`${baseURL}/site/info`, {
+          headers: {
+            Accept: "application/json",
+            Cookie: gnSessionId ? `GNSESSIONID=${gnSessionId}` : "",
+          },
+          timeout: 10000,
+        });
+        for (const cookie of siteResponse.headers["set-cookie"] || []) {
+          if (cookie.includes("JSESSIONID=")) jsSessionId = cookie.split("JSESSIONID=")[1].split(";")[0];
+          if (cookie.includes("XSRF-TOKEN=")) xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
         }
-        if (cookie.includes("XSRF-TOKEN=")) {
-          xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
-        }
+        console.log(`[Auth] /site/info → JSESSIONID=${!!jsSessionId}, XSRF=${!!xsrfToken}`);
+      } catch (error: any) {
+        console.log(`[Auth] /site/info fallback failed: ${error.message}`);
       }
     }
 
-    // Build cookie header
+    // Step 3: Fallback — GET /me with Basic Auth
+    if (!xsrfToken) {
+      console.log(`[Auth] Trying /me with Basic Auth...`);
+      const cookieForMe = [
+        jsSessionId ? `JSESSIONID=${jsSessionId}` : "",
+        gnSessionId ? `GNSESSIONID=${gnSessionId}` : "",
+      ].filter(Boolean).join("; ");
+      try {
+        const meResponse = await axios.get(`${baseURL}/me`, {
+          headers: {
+            Accept: "application/json",
+            Cookie: cookieForMe,
+            Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`,
+          },
+          timeout: 10000,
+          validateStatus: () => true,
+        });
+        for (const cookie of meResponse.headers["set-cookie"] || []) {
+          if (cookie.includes("XSRF-TOKEN=")) xsrfToken = cookie.split("XSRF-TOKEN=")[1].split(";")[0];
+          if (cookie.includes("JSESSIONID=")) jsSessionId = cookie.split("JSESSIONID=")[1].split(";")[0];
+          if (cookie.includes("GNSESSIONID=")) gnSessionId = cookie.split("GNSESSIONID=")[1].split(";")[0];
+        }
+        console.log(`[Auth] /me → ${meResponse.status}, XSRF=${!!xsrfToken}`);
+      } catch (error: any) {
+        console.log(`[Auth] /me fallback failed: ${error.message}`);
+      }
+    }
+
     const cookieParts: string[] = [];
     if (jsSessionId) cookieParts.push(`JSESSIONID=${jsSessionId}`);
     if (gnSessionId) cookieParts.push(`GNSESSIONID=${gnSessionId}`);
     if (xsrfToken) cookieParts.push(`XSRF-TOKEN=${xsrfToken}`);
     const cookieHeader = cookieParts.join("; ");
 
-    this.authSession = {
-      cookieHeader,
-      xsrfToken,
-      expiresAt: now + ToolHandlers.SESSION_CACHE_TTL_MS,
-    };
-
+    console.log(`[Auth] Session ready: JSESSIONID=${!!jsSessionId}, GNSESSIONID=${!!gnSessionId}, XSRF=${!!xsrfToken}`);
     return { cookieHeader, xsrfToken };
   }
 
@@ -791,7 +880,8 @@ export class ToolHandlers {
       // Get form headers (includes Content-Type with boundary)
       const formHeaders = formData.getHeaders();
 
-      // GeoNetwork requires both session cookies AND Basic Auth for file uploads
+      // Apache LDAP requires Basic Auth on the attachments POST endpoint.
+      // Session cookies alone are not sufficient — we must include the Authorization header.
       const response = await axios.post(
         `${baseURL}/records/${metadataUuid}/attachments`,
         formData,
@@ -805,7 +895,7 @@ export class ToolHandlers {
             Cookie: cookieHeader,
             "X-XSRF-TOKEN": xsrfToken || "",
             Accept: "application/json",
-            Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
+            Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`,
           },
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
@@ -825,6 +915,8 @@ export class ToolHandlers {
     } catch (error: any) {
       const errorData = error.response?.data;
       const errorStatus = error.response?.status;
+      console.log(`[UploadFileToRecord] Error status: ${errorStatus}`);
+      console.log(`[UploadFileToRecord] Response headers: ${JSON.stringify(error.response?.headers)}`);
 
       // Provide helpful error message for access denied
       if (errorStatus === 500 && errorData?.message === "Access Denied") {

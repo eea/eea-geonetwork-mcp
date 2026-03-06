@@ -715,17 +715,15 @@ export class ToolHandlers {
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     try {
+      const qs = new URLSearchParams(tags.map(t => ["id", String(t)]));
+      qs.append("clear", "false");
       const response = await axios.put(
-        `${baseURL}/records/${uuid}/tags`,
-        tags,
+        `${baseURL}/records/${uuid}/tags?${qs}`,
+        null,
         {
-          params: {
-            clear: false,
-          },
           headers: {
             Cookie: cookieHeader,
             Accept: "application/json",
-            "Content-Type": "application/json",
           },
         }
       );
@@ -756,14 +754,13 @@ export class ToolHandlers {
     const baseURL = this.axiosInstance.defaults.baseURL || "";
 
     try {
+      const qs = new URLSearchParams(tags.map(t => ["id", String(t)]));
       const response = await axios.delete(
-        `${baseURL}/records/${uuid}/tags`,
+        `${baseURL}/records/${uuid}/tags?${qs}`,
         {
-          data: tags,
           headers: {
             Cookie: cookieHeader,
             Accept: "application/json",
-            "Content-Type": "application/json",
           },
         }
       );

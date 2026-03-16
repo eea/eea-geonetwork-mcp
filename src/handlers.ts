@@ -72,7 +72,7 @@ export class ToolHandlers {
     const searchBody: Record<string, any> = {
       from,
       size: actualSize,
-      ...(query && { query: { query_string: { query } } }),
+      ...(query && { query: { query_string: { query, default_operator: "AND" } } }),
       ...(bucket && { aggregations: { [bucket]: { terms: { field: bucket } } } }),
       ...(sortBy && { sort: [{ [sortBy]: { order: normalizedSortOrder } }] }),
     };
@@ -84,12 +84,27 @@ export class ToolHandlers {
     const totalHits = response.data.hits?.total?.value || 0;
     console.log(`[API] ${response.status} - Found ${totalHits} results (returning ${actualSize}, max: ${maxSize})`);
 
-    // Add warning if results were truncated
-    if (totalHits > actualSize) {
-      response.data._warning = `Results limited to ${actualSize} of ${totalHits} total. Use 'from' parameter to paginate.`;
-    }
+    const hits: any[] = response.data.hits?.hits || [];
 
-    return this.formatResponse(response.data);
+    const lines: string[] = [];
+    lines.push(`Found ${totalHits} record(s) (showing ${hits.length}):`);
+    if (totalHits > actualSize) {
+      lines.push(`Note: Use 'from' parameter to paginate through remaining results.`);
+    }
+    lines.push("");
+
+    hits.forEach((hit: any, i: number) => {
+      const src = hit._source || {};
+      const title = src.resourceTitleObject?.default ?? src.resourceTitle ?? "(no title)";
+      const uuid = src.uuid ?? "(no uuid)";
+      const description = src.resourceAbstractObject?.default ?? src.resourceAbstract ?? "";
+      lines.push(`${from + i + 1}. ${title}`);
+      lines.push(`   UUID: ${uuid}`);
+      if (description) lines.push(`   Description: ${description}`);
+      lines.push("");
+    });
+
+    return this.formatResponse(lines.join("\n"), true);
   }
 
   async getRecord(args: GetRecordArgs): Promise<ToolResponse> {
@@ -240,7 +255,9 @@ export class ToolHandlers {
   async searchByExtent(args: SearchByExtentArgs): Promise<ToolResponse> {
     const { minx, miny, maxx, maxy, relation = "intersects" } = args;
 
+    const maxSize = this.config.maxSearchResults;
     const searchBody = {
+      size: maxSize,
       query: {
         bool: {
           must: [
@@ -262,7 +279,28 @@ export class ToolHandlers {
 
     const response = await this.axiosInstance.post("/search/records/_search", searchBody);
 
-    return this.formatResponse(response.data);
+    const totalHits = response.data.hits?.total?.value || 0;
+    const hits: any[] = response.data.hits?.hits || [];
+
+    const lines: string[] = [];
+    lines.push(`Found ${totalHits} record(s) within extent [${minx}, ${miny}, ${maxx}, ${maxy}] (showing ${hits.length}):`);
+    if (totalHits > maxSize) {
+      lines.push(`Note: Results limited to ${maxSize} of ${totalHits} total.`);
+    }
+    lines.push("");
+
+    hits.forEach((hit: any, i: number) => {
+      const src = hit._source || {};
+      const title = src.resourceTitleObject?.default ?? src.resourceTitle ?? "(no title)";
+      const uuid = src.uuid ?? "(no uuid)";
+      const description = src.resourceAbstractObject?.default ?? src.resourceAbstract ?? "";
+      lines.push(`${i + 1}. ${title}`);
+      lines.push(`   UUID: ${uuid}`);
+      if (description) lines.push(`   Description: ${description}`);
+      lines.push("");
+    });
+
+    return this.formatResponse(lines.join("\n"), true);
   }
 
   async duplicateRecord(args: DuplicateRecordArgs): Promise<ToolResponse> {
@@ -303,33 +341,52 @@ export class ToolHandlers {
       let newUuid = duplicateResult.uuid || duplicateResult.metadataUuid;
       const newId = duplicateResult.id || duplicateResult.metadataId || duplicateResult;
 
-      // If we got an ID but no UUID, fetch the record directly via the API
+      // If we got an ID but no UUID, retry with delay (record may not be indexed yet)
       if (!newUuid && newId && typeof newId === "number") {
-        // Try direct API call first (most reliable, works immediately after creation)
-        try {
-          const recordResponse = await axios.get(`${baseURL}/records/${newId}`, {
-            headers: {
-              Cookie: cookieHeader,
-              Accept: "application/json",
-            },
-          });
-          newUuid = recordResponse.data?.uuid || recordResponse.data?.metadataIdentifier;
-          console.log(`[Duplicate] Resolved UUID via direct API: ${newUuid}`);
-        } catch {
-          // Fall back to Elasticsearch search (may lag behind by a few seconds)
+        const maxRetries = 5;
+        const delayMs = 2000;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          console.log(`[Duplicate] UUID lookup attempt ${attempt}/${maxRetries} for id=${newId}...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          try {
+            // Try direct API call first
+            const recordResponse = await axios.get(`${baseURL}/records/${newId}`, {
+              headers: { Cookie: cookieHeader, Accept: "application/json" },
+            });
+            newUuid = recordResponse.data?.uuid || recordResponse.data?.metadataUuid || recordResponse.data?.metadataIdentifier;
+            if (newUuid) {
+              console.log(`[Duplicate] Resolved UUID via direct API (attempt ${attempt}): ${newUuid}`);
+              break;
+            }
+          } catch {
+            // fall through to Elasticsearch
+          }
           try {
             const searchResponse = await this.axiosInstance.post("/search/records/_search", {
-              query: { term: { _id: newId.toString() } },
+              query: {
+                bool: {
+                  should: [
+                    { term: { id: newId } },
+                    { term: { "id.keyword": newId.toString() } },
+                    { term: { _id: newId.toString() } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
               size: 1,
             });
             const hits = searchResponse.data.hits?.hits || [];
             if (hits.length > 0) {
               newUuid = hits[0]._source?.uuid || hits[0]._id;
-              console.log(`[Duplicate] Resolved UUID via Elasticsearch: ${newUuid}`);
+              console.log(`[Duplicate] Resolved UUID via Elasticsearch (attempt ${attempt}): ${newUuid}`);
+              break;
             }
           } catch {
-            // UUID lookup failed, return with ID only
+            // continue retrying
           }
+        }
+        if (!newUuid) {
+          console.log(`[Duplicate] Could not resolve UUID after ${maxRetries} attempts for id=${newId}`);
         }
       }
 
@@ -570,14 +627,18 @@ export class ToolHandlers {
               },
             });
 
-            const uuid = directResponse.data?.uuid || directResponse.data?.metadataIdentifier;
+            console.log(`[GetRecordById] Direct API response keys:`, Object.keys(directResponse.data || {}));
+            console.log(`[GetRecordById] Direct API response sample:`, JSON.stringify(directResponse.data).slice(0, 500));
+            const uuid = directResponse.data?.uuid
+              || directResponse.data?.metadataUuid
+              || directResponse.data?.metadataIdentifier
+              || directResponse.data?.["geonet:info"]?.uuid;
             console.log(`[GetRecordById] Found via direct API: UUID=${uuid}`);
 
             return this.formatResponse({
               id,
               uuid,
               title: directResponse.data?.resourceTitleObject?.default,
-              source: directResponse.data,
             });
           } catch (directError: any) {
             console.log(`[GetRecordById] Direct API also failed:`, directError.response?.status, directError.response?.data);
@@ -600,7 +661,7 @@ export class ToolHandlers {
       }
 
       const record = hits[0];
-      const uuid = record._source?.uuid || record._source?.metadataIdentifier || record._id;
+      const uuid = record._source?.uuid || record._source?.metadataUuid || record._source?.metadataIdentifier || record._id;
 
       console.log(`[GetRecordById] Found record: UUID=${uuid}`);
 
@@ -608,7 +669,6 @@ export class ToolHandlers {
         id,
         uuid,
         title: record._source?.resourceTitleObject?.default || record._source?.title,
-        source: record._source,
       });
     } catch (error: any) {
       console.log(`[GetRecordById] Error:`, error.response?.data);

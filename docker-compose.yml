@@ -1,20 +1,24 @@
-version: '3.8'
-
 services:
   eea-geonetwork-mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: eeacms/eea-geonetwork-mcp:latest
     container_name: eea-geonetwork-mcp
     ports:
       - "3001:3001"
     environment:
-      - NODE_ENV=production
-      - PORT=3001
+      NODE_ENV: production
+      BASE_URL: ${BASE_URL}
+      MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS}
+      PORT: ${PORT}
+      CATALOGUE_USERNAME: ${CATALOGUE_USERNAME}
+      CATALOGUE_PASSWORD: ${CATALOGUE_PASSWORD}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))\" || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+
+      

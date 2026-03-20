@@ -343,51 +343,34 @@ export class ToolHandlers {
 
       // If we got an ID but no UUID, retry with delay (record may not be indexed yet)
       if (!newUuid && newId && typeof newId === "number") {
-        const maxRetries = 5;
-        const delayMs = 2000;
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          console.log(`[Duplicate] UUID lookup attempt ${attempt}/${maxRetries} for id=${newId}...`);
-          await new Promise(resolve => setTimeout(resolve, delayMs));
-          try {
-            // Try direct API call first
-            const recordResponse = await axios.get(`${baseURL}/records/${newId}`, {
-              headers: { Cookie: cookieHeader, Accept: "application/json" },
-            });
-            newUuid = recordResponse.data?.uuid || recordResponse.data?.metadataUuid || recordResponse.data?.metadataIdentifier;
-            if (newUuid) {
-              console.log(`[Duplicate] Resolved UUID via direct API (attempt ${attempt}): ${newUuid}`);
-              break;
-            }
-          } catch {
-            // fall through to Elasticsearch
-          }
-          try {
-            const searchResponse = await this.axiosInstance.post("/search/records/_search", {
-              query: {
-                bool: {
-                  should: [
-                    { term: { id: newId } },
-                    { term: { "id.keyword": newId.toString() } },
-                    { term: { _id: newId.toString() } },
-                  ],
-                  minimum_should_match: 1,
-                },
+        try {
+          const searchResponse = await this.axiosInstance.post("/search/records/_search", {
+            query: {
+              bool: {
+                must: [
+                  { term: { id: newId } }
+                ]
               },
-              size: 1,
-            });
-            const hits = searchResponse.data.hits?.hits || [];
-            if (hits.length > 0) {
-              newUuid = hits[0]._source?.uuid || hits[0]._id;
-              console.log(`[Duplicate] Resolved UUID via Elasticsearch (attempt ${attempt}): ${newUuid}`);
-              break;
+            },
+            size: 1,
+          }, {
+            headers: {
+              Cookie: cookieHeader,
+              Accept: "application/json",
+              "Content-Type": "application/json",
             }
-          } catch {
-            // continue retrying
+          });
+          const hits = searchResponse.data.hits?.hits || [];
+          if (hits.length > 0) {
+            newUuid = hits[0]._source?.uuid || hits[0]._id;
+            console.log(`[Duplicate] Resolved UUID via Elasticsearch: ${newUuid}`);
           }
+        } catch {
+          // continue retrying
         }
-        if (!newUuid) {
-          console.log(`[Duplicate] Could not resolve UUID after ${maxRetries} attempts for id=${newId}`);
-        }
+      }
+      if (!newUuid) {
+        console.log(`[Duplicate] Could not resolve UUID for id=${newId}`);
       }
 
       return this.formatResponse({

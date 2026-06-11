@@ -326,12 +326,14 @@ export class ToolHandlers {
 
     const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
 
     try {
       const response = await axios.put(`${baseURL}/records/duplicate`, null, {
         params,
         headers: {
           Cookie: cookieHeader,
+          Authorization: basicAuth,
           Accept: "application/json",
           "Content-Type": "application/json",
         },
@@ -429,11 +431,14 @@ export class ToolHandlers {
     formData.append("username", this.config.username);
     formData.append("password", this.config.password);
 
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
+
     try {
       const signinResponse = await axios.post(signinUrl, formData.toString(), {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           Accept: "application/json, text/html",
+          Authorization: basicAuth,
         },
         timeout: 10000,
         maxRedirects: 0,
@@ -457,6 +462,7 @@ export class ToolHandlers {
         const siteResponse = await axios.get(`${baseURL}/site/info`, {
           headers: {
             Accept: "application/json",
+            Authorization: basicAuth,
             Cookie: gnSessionId ? `GNSESSIONID=${gnSessionId}` : "",
           },
           timeout: 10000,
@@ -526,6 +532,7 @@ export class ToolHandlers {
 
     const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
 
     // Build the batch editing request body
     // Wrap value with appropriate GeoNetwork operation tag
@@ -563,6 +570,7 @@ export class ToolHandlers {
           },
           headers: {
             Cookie: cookieHeader,
+            Authorization: basicAuth,
             Accept: "application/json",
             "Content-Type": "application/json",
           },
@@ -687,6 +695,7 @@ export class ToolHandlers {
 
     const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
 
     // First, detect the schema by fetching the record's XML
     let schemaType = "iso19115-3"; // Default to ISO 19115-3 as it's more common in newer GeoNetwork
@@ -694,6 +703,7 @@ export class ToolHandlers {
       const xmlResponse = await axios.get(`${baseURL}/records/${uuid}/formatters/xml`, {
         headers: {
           Cookie: cookieHeader,
+          Authorization: basicAuth,
           Accept: "application/xml",
         },
       });
@@ -742,6 +752,7 @@ export class ToolHandlers {
           },
           headers: {
             Cookie: cookieHeader,
+            Authorization: basicAuth,
             Accept: "application/json",
             "Content-Type": "application/json",
           },
@@ -773,6 +784,7 @@ export class ToolHandlers {
 
     const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
 
     try {
       const qs = new URLSearchParams(tags.map(t => ["id", String(t)]));
@@ -783,6 +795,7 @@ export class ToolHandlers {
         {
           headers: {
             Cookie: cookieHeader,
+            Authorization: basicAuth,
             Accept: "application/json",
           },
         }
@@ -812,6 +825,7 @@ export class ToolHandlers {
 
     const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
 
     try {
       const qs = new URLSearchParams(tags.map(t => ["id", String(t)]));
@@ -820,6 +834,7 @@ export class ToolHandlers {
         {
           headers: {
             Cookie: cookieHeader,
+            Authorization: basicAuth,
             Accept: "application/json",
           },
         }
@@ -872,6 +887,7 @@ export class ToolHandlers {
 
     const { cookieHeader } = await this.getAuthenticatedSession();
     const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
 
     try {
       const response = await axios.delete(
@@ -882,6 +898,7 @@ export class ToolHandlers {
           },
           headers: {
             Cookie: cookieHeader,
+            Authorization: basicAuth,
             Accept: "application/json",
           },
         }

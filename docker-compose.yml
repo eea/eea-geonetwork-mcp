@@ -4,15 +4,10 @@ services:
     container_name: eea-geonetwork-mcp
     ports:
       - "3001:3001"
+    env_file:
+      - /root/ENV_FILES/geonetwork-mcp.env
     environment:
       NODE_ENV: production
-      BASE_URL: ${BASE_URL}
-      MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS}
-      PORT: ${PORT}
-      CATALOGUE_USERNAME: ${CATALOGUE_USERNAME}
-      CATALOGUE_PASSWORD: ${CATALOGUE_PASSWORD}
-      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS}
-      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))\" || exit 1"]

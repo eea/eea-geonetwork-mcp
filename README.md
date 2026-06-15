@@ -2,6 +2,23 @@
 
 A Model Context Protocol (MCP) server that provides tools to interact with the European Environment Agency (EEA) GeoNetwork Catalogue API (GeoNetwork 4.4.9).
 
+## Quick Restart (Production)
+
+```bash
+docker pull eeacms/eea-geonetwork-mcp:latest
+docker stop eea-geonetwork-mcp
+docker rm eea-geonetwork-mcp
+
+docker run -d \
+  --name eea-geonetwork-mcp \
+  --env-file /root/ENV_FILES/geonetwork-mcp.env \
+  -e UPLOAD_DIR=/app/uploads \
+  -p 3001:3001 \
+  -v eea_geonetwork_uploads:/app/uploads \
+  --restart unless-stopped \
+  eeacms/eea-geonetwork-mcp:latest
+```
+
 ## Features
 
 This MCP server provides 20 tools for interacting with the EEA GeoNetwork Catalogue:

@@ -117,6 +117,15 @@ export interface UploadUrlToRecordArgs {
   approved?: boolean;
 }
 
+export interface UploadBase64ToRecordArgs {
+  metadataUuid: string;
+  fileContent: string;
+  filename: string;
+  contentType?: string;
+  visibility?: "PUBLIC" | "PRIVATE";
+  approved?: boolean;
+}
+
 export interface HandlerConfig {
   maxSearchResults: number;
   username: string;

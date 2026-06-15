@@ -421,6 +421,43 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "upload_base64_to_record",
+    description: "Attach a file to a metadata record using its base64-encoded content. Use this in Copilot Studio or any environment where file attachments are provided as base64 data rather than accessible URLs. The agent must encode the file as base64 and pass it in fileContent. Requires authentication.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "The UUID of the metadata record to attach the file to",
+        },
+        fileContent: {
+          type: "string",
+          description: "Base64-encoded content of the file to upload",
+        },
+        filename: {
+          type: "string",
+          description: "Filename to use in GeoNetwork (e.g. 'report.pdf', 'photo.png')",
+        },
+        contentType: {
+          type: "string",
+          description: "MIME type of the file (e.g. 'image/png', 'application/pdf'). Inferred from filename if omitted.",
+        },
+        visibility: {
+          type: "string",
+          enum: ["PUBLIC", "PRIVATE"],
+          description: "The sharing policy for the file (default: PUBLIC)",
+          default: "PUBLIC",
+        },
+        approved: {
+          type: "boolean",
+          description: "Use approved version or not (default: false)",
+          default: false,
+        },
+      },
+      required: ["metadataUuid", "fileContent", "filename"],
+    },
+  },
+  {
     name: "upload_url_to_record",
     description: "Download a file from a URL and attach it to a metadata record. Use this in containerised or remote deployments (Copilot Studio, Docker, etc.) where the MCP server cannot access the user's local filesystem. The server fetches the file from the URL and uploads it to GeoNetwork. Requires authentication.",
     inputSchema: {

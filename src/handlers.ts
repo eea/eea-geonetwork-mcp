@@ -22,6 +22,7 @@ import {
   DeleteAttachmentArgs,
   UploadFileToRecordArgs,
   UploadUrlToRecordArgs,
+  UploadBase64ToRecordArgs,
   ToolResponse,
   HandlerConfig,
 } from "./types.js";
@@ -988,6 +989,92 @@ export class ToolHandlers {
                 `Error: ${JSON.stringify(errorData, null, 2)}`,
             },
           ],
+          isError: true,
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  async uploadBase64ToRecord(args: UploadBase64ToRecordArgs): Promise<ToolResponse> {
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("upload_base64_to_record");
+    }
+
+    const { metadataUuid, fileContent, filename, contentType: explicitContentType, visibility = "PUBLIC", approved = false } = args;
+
+    // Infer MIME type from extension when caller does not provide it
+    const ext = filename.split(".").pop()?.toLowerCase() || "";
+    const mimeMap: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+      webp: "image/webp", pdf: "application/pdf", zip: "application/zip",
+      json: "application/json", xml: "application/xml", csv: "text/csv",
+      txt: "text/plain", doc: "application/msword",
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      xls: "application/vnd.ms-excel",
+      xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    };
+    const contentType = explicitContentType || mimeMap[ext] || "application/octet-stream";
+
+    console.log(`[UploadBase64ToRecord] UUID: ${metadataUuid}, Filename: ${filename}, Type: ${contentType}`);
+
+    // Decode base64 — strip data URI prefix if present (e.g. "data:image/png;base64,...")
+    const base64Data = fileContent.includes(",") ? fileContent.split(",")[1] : fileContent;
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = Buffer.from(base64Data, "base64");
+    } catch {
+      return {
+        content: [{ type: "text", text: "Error: fileContent is not valid base64." }],
+        isError: true,
+      };
+    }
+
+    console.log(`[UploadBase64ToRecord] Decoded ${fileBuffer.length} bytes`);
+
+    const { cookieHeader, xsrfToken } = await this.getAuthenticatedSession();
+    const baseURL = this.axiosInstance.defaults.baseURL || "";
+
+    try {
+      const formData = new FormData();
+      formData.append("file", fileBuffer, { filename, contentType });
+      const formHeaders = formData.getHeaders();
+
+      const response = await axios.post(
+        `${baseURL}/records/${metadataUuid}/attachments`,
+        formData,
+        {
+          params: { visibility, approved },
+          headers: {
+            ...formHeaders,
+            Cookie: cookieHeader,
+            "X-XSRF-TOKEN": xsrfToken || "",
+            Accept: "application/json",
+            Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`,
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        }
+      );
+
+      return this.formatResponse({
+        success: true,
+        message: `File "${filename}" uploaded successfully to record ${metadataUuid}`,
+        file: { name: filename, size: fileBuffer.length, contentType },
+        resource: response.data,
+      });
+    } catch (error: any) {
+      const errorData = error.response?.data;
+      const errorStatus = error.response?.status;
+      console.log(`[UploadBase64ToRecord] Error status: ${errorStatus}`);
+
+      if (errorStatus === 500 && errorData?.message === "Access Denied") {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Access Denied. The record may be published/approved or you may not have edit permissions.\n\nSuggestion: Try using duplicate_record to create a draft copy first.\n\nRecord UUID: ${metadataUuid}\nError: ${JSON.stringify(errorData, null, 2)}`,
+          }],
           isError: true,
         };
       }

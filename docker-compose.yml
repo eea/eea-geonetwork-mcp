@@ -8,6 +8,9 @@ services:
       - /root/ENV_FILES/geonetwork-mcp.env
     environment:
       NODE_ENV: production
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))\" || exit 1"]
@@ -16,4 +19,6 @@ services:
       retries: 3
       start_period: 10s
 
-      
+volumes:
+  uploads_data:
+    driver: local

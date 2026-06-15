@@ -21,6 +21,7 @@ import {
   GetAttachmentsArgs,
   DeleteAttachmentArgs,
   UploadFileToRecordArgs,
+  UploadUrlToRecordArgs,
   ToolResponse,
   HandlerConfig,
 } from "./types.js";
@@ -987,6 +988,87 @@ export class ToolHandlers {
                 `Error: ${JSON.stringify(errorData, null, 2)}`,
             },
           ],
+          isError: true,
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  async uploadUrlToRecord(args: UploadUrlToRecordArgs): Promise<ToolResponse> {
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("upload_url_to_record");
+    }
+
+    const { metadataUuid, url, filename: explicitFilename, visibility = "PUBLIC", approved = false } = args;
+
+    // Derive a filename from the URL when the caller does not provide one
+    const filename = explicitFilename
+      || decodeURIComponent(url.split("/").pop()?.split("?")[0] || "attachment");
+
+    console.log(`[UploadUrlToRecord] UUID: ${metadataUuid}, URL: ${url}, Filename: ${filename}`);
+
+    // Download the file into memory
+    let fileBuffer: Buffer;
+    let contentType: string;
+    try {
+      const downloadResponse = await axios.get(url, {
+        responseType: "arraybuffer",
+        timeout: 60000,
+      });
+      fileBuffer = Buffer.from(downloadResponse.data as ArrayBuffer);
+      contentType = (downloadResponse.headers["content-type"] as string) || "application/octet-stream";
+      console.log(`[UploadUrlToRecord] Downloaded ${fileBuffer.length} bytes, type: ${contentType}`);
+    } catch (downloadError: any) {
+      return {
+        content: [{ type: "text", text: `Error downloading file from URL: ${downloadError.message}` }],
+        isError: true,
+      };
+    }
+
+    const { cookieHeader, xsrfToken } = await this.getAuthenticatedSession();
+    const baseURL = this.axiosInstance.defaults.baseURL || "";
+
+    try {
+      const formData = new FormData();
+      formData.append("file", fileBuffer, { filename, contentType });
+      const formHeaders = formData.getHeaders();
+
+      const response = await axios.post(
+        `${baseURL}/records/${metadataUuid}/attachments`,
+        formData,
+        {
+          params: { visibility, approved },
+          headers: {
+            ...formHeaders,
+            Cookie: cookieHeader,
+            "X-XSRF-TOKEN": xsrfToken || "",
+            Accept: "application/json",
+            Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`,
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        }
+      );
+
+      return this.formatResponse({
+        success: true,
+        message: `File "${filename}" uploaded successfully to record ${metadataUuid}`,
+        file: { name: filename, size: fileBuffer.length, sourceUrl: url },
+        resource: response.data,
+      });
+    } catch (error: any) {
+      const errorData = error.response?.data;
+      const errorStatus = error.response?.status;
+      console.log(`[UploadUrlToRecord] Error status: ${errorStatus}`);
+
+      if (errorStatus === 500 && errorData?.message === "Access Denied") {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Access Denied. The record may be published/approved or you may not have edit permissions.\n\nSuggestion: Try using duplicate_record to create a draft copy first.\n\nRecord UUID: ${metadataUuid}\nError: ${JSON.stringify(errorData, null, 2)}`,
+          }],
           isError: true,
         };
       }

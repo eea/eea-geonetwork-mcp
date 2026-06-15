@@ -41,6 +41,10 @@ RUN npm ci --omit=dev --ignore-scripts
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
+# Persistent storage for the upload basket (mount a volume here in production)
+RUN mkdir -p /app/uploads
+VOLUME ["/app/uploads"]
+
 # Expose the port
 EXPOSE 3001
 

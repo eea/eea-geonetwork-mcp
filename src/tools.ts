@@ -393,7 +393,7 @@ export const tools: Tool[] = [
   },
   {
     name: "upload_file_to_record",
-    description: "Upload a file from your local filesystem directly to a metadata record as an attachment. The file will be uploaded as binary data to GeoNetwork. Requires authentication.",
+    description: "Upload a file from the MCP server's local filesystem to a metadata record as an attachment. NOTE: only works in local/stdio deployments where the server and client share the same filesystem. For containerised or remote deployments (Copilot Studio, Docker, etc.) use upload_url_to_record instead. Requires authentication.",
     inputSchema: {
       type: "object",
       properties: {
@@ -418,6 +418,39 @@ export const tools: Tool[] = [
         },
       },
       required: ["metadataUuid", "filePath"],
+    },
+  },
+  {
+    name: "upload_url_to_record",
+    description: "Download a file from a URL and attach it to a metadata record. Use this in containerised or remote deployments (Copilot Studio, Docker, etc.) where the MCP server cannot access the user's local filesystem. The server fetches the file from the URL and uploads it to GeoNetwork. Requires authentication.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "The UUID of the metadata record to attach the file to",
+        },
+        url: {
+          type: "string",
+          description: "Public URL of the file to download and attach (e.g. a Copilot Studio attachment URL, SharePoint link, or the basket URL returned by POST /upload)",
+        },
+        filename: {
+          type: "string",
+          description: "Override the filename used in GeoNetwork. If omitted, the filename is extracted from the URL.",
+        },
+        visibility: {
+          type: "string",
+          enum: ["PUBLIC", "PRIVATE"],
+          description: "The sharing policy for the file (default: PUBLIC)",
+          default: "PUBLIC",
+        },
+        approved: {
+          type: "boolean",
+          description: "Use approved version or not (default: false)",
+          default: false,
+        },
+      },
+      required: ["metadataUuid", "url"],
     },
   },
 ];

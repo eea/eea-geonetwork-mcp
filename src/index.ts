@@ -515,6 +515,7 @@ class GeoNetworkMcpServer {
         get_attachments: () => this.handlers.getAttachments(args),
         delete_attachment: () => this.handlers.deleteAttachment(args),
         upload_file_to_record: () => this.handlers.uploadFileToRecord(args),
+        upload_url_to_record: () => this.handlers.uploadUrlToRecord(args),
       };
 
       const handler = toolHandlers[name];

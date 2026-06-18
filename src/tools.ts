@@ -490,4 +490,38 @@ export const tools: Tool[] = [
       required: ["metadataUuid", "url"],
     },
   },
+  {
+    name: "create_upload_link",
+    description:
+      "Create a one-screen upload link for attaching a local file to a metadata record. " +
+      "Returns a short-lived URL bound to the given record; the user opens it in a browser, " +
+      "drags in a file, and it is attached directly to GeoNetwork. Use this when the file lives " +
+      "on the user's machine (not on a public URL or the server). Requires authentication.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "UUID of the metadata record the uploaded file will be attached to",
+        },
+        visibility: {
+          type: "string",
+          enum: ["PUBLIC", "PRIVATE"],
+          description: "The sharing policy for files uploaded via this link (default: PUBLIC)",
+          default: "PUBLIC",
+        },
+        approved: {
+          type: "boolean",
+          description: "Attach to the approved version or not (default: false)",
+          default: false,
+        },
+        expiresInMinutes: {
+          type: "number",
+          description: "How long the link stays valid, in minutes (default: 30)",
+          default: 30,
+        },
+      },
+      required: ["metadataUuid"],
+    },
+  },
 ];

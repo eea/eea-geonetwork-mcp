@@ -14,6 +14,7 @@ import rateLimit from "express-rate-limit";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { tools } from "./tools.js";
 import { ToolHandlers } from "./handlers.js";
 import { createSwaggerSpec, registerSwaggerDocs } from "./swagger.js";
@@ -101,6 +102,79 @@ const upload = multer({
     fileSize: CONFIG.MAX_FILE_SIZE
   }
 });
+
+// In-memory upload for the /attach flow (Bridge A): the file is streamed
+// straight to GeoNetwork and never written to disk, so there is nothing to
+// clean up afterwards.
+const attachUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: CONFIG.MAX_FILE_SIZE,
+  },
+});
+
+// Short-lived tickets that bind a browser upload page to a specific record.
+// The agent mints a ticket (knows the record from the conversation); the user
+// supplies the bytes via the browser (which is good at moving local files).
+interface UploadTicket {
+  metadataUuid: string;
+  visibility: "PUBLIC" | "PRIVATE";
+  approved: boolean;
+  expiresAt: number;
+}
+const uploadTickets = new Map<string, UploadTicket>();
+
+const pruneTickets = () => {
+  const now = Date.now();
+  for (const [token, ticket] of uploadTickets) {
+    if (ticket.expiresAt <= now) uploadTickets.delete(token);
+  }
+};
+
+const createUploadTicket = (
+  metadataUuid: string,
+  visibility: "PUBLIC" | "PRIVATE",
+  approved: boolean,
+  expiresInMinutes: number
+): { token: string; expiresAt: number } => {
+  pruneTickets();
+  const token = crypto.randomBytes(24).toString("hex");
+  const expiresAt = Date.now() + expiresInMinutes * 60 * 1000;
+  uploadTickets.set(token, { metadataUuid, visibility, approved, expiresAt });
+  return { token, expiresAt };
+};
+
+const getValidTicket = (token?: string): UploadTicket | null => {
+  if (!token) return null;
+  const ticket = uploadTickets.get(token);
+  if (!ticket) return null;
+  if (ticket.expiresAt <= Date.now()) {
+    uploadTickets.delete(token);
+    return null;
+  }
+  return ticket;
+};
+
+// Periodically sweep the legacy disk basket (/upload) so old files don't pile
+// up. The /attach flow never writes here. Default: remove files older than 24h.
+const UPLOAD_TTL_MS = parseInt(process.env.UPLOAD_TTL_MS || "", 10) || 24 * 60 * 60 * 1000;
+const sweepUploadDir = () => {
+  fs.readdir(CONFIG.UPLOAD_DIR, (err, files) => {
+    if (err) return;
+    const cutoff = Date.now() - UPLOAD_TTL_MS;
+    for (const name of files) {
+      const filepath = path.join(CONFIG.UPLOAD_DIR, name);
+      fs.stat(filepath, (statErr, stats) => {
+        if (statErr || !stats.isFile()) return;
+        if (stats.mtimeMs < cutoff) {
+          fs.unlink(filepath, () => console.log(`[Cleanup] Removed stale basket file: ${name}`));
+        }
+      });
+    }
+  });
+};
+setInterval(sweepUploadDir, 60 * 60 * 1000).unref();
+setInterval(pruneTickets, 10 * 60 * 1000).unref();
 
 class GeoNetworkMcpServer {
   private app: express.Application;
@@ -198,6 +272,7 @@ class GeoNetworkMcpServer {
           playground: "GET /playground",
           upload: "POST /upload",
           uploads: "GET /uploads/:filename",
+          attach: "GET /attach?token=... (file-upload page bound to a record)",
         },
         tools: tools.map((t) => ({ name: t.name, description: t.description })),
       });
@@ -450,6 +525,139 @@ class GeoNetworkMcpServer {
       res.sendFile(resolvedPath);
     });
 
+    // Bridge A: the upload page bound to a record via a short-lived ticket.
+    this.app.get("/attach", (req, res) => {
+      const token = pickHeaderValue(req.query.token as string | string[] | undefined);
+      const ticket = getValidTicket(token);
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+
+      if (!ticket) {
+        res.status(404).send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Upload link expired</title>
+<style>body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.card{background:#161925;border:1px solid #2d3748;border-radius:10px;padding:32px;max-width:420px;text-align:center}
+h1{font-size:1.1rem;margin:0 0 8px}p{color:#a0aec0;font-size:0.9rem;line-height:1.5}</style></head>
+<body><div class="card"><h1>Link expired or invalid</h1><p>Ask the assistant to generate a new upload link with <code>create_upload_link</code>.</p></div></body></html>`);
+        return;
+      }
+
+      res.send(`<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attach file to record</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#161925;border:1px solid #2d3748;border-radius:10px;padding:28px;width:480px;max-width:92vw}
+h1{font-size:1.15rem;margin-bottom:4px}
+.uuid{font-family:monospace;color:#90cdf4;font-size:0.8rem;word-break:break-all;margin-bottom:18px}
+.drop{border:2px dashed #2d3748;border-radius:8px;padding:36px 16px;text-align:center;color:#718096;cursor:pointer;transition:border .15s,background .15s}
+.drop.over{border-color:#4299e1;background:#1a2744;color:#90cdf4}
+.drop strong{color:#e2e8f0}
+.file{margin-top:14px;font-size:0.85rem;color:#a0aec0}
+button{margin-top:18px;width:100%;background:#2b6cb0;color:#fff;border:none;padding:11px;border-radius:6px;font-size:0.9rem;font-weight:600;cursor:pointer;transition:background .15s}
+button:hover:not(:disabled){background:#2c5282}
+button:disabled{background:#4a5568;cursor:not-allowed}
+.status{margin-top:14px;font-size:0.85rem;min-height:20px}
+.status.ok{color:#68d391}.status.err{color:#fc8181}.status.busy{color:#f6e05e}
+input[type=file]{display:none}
+</style></head>
+<body>
+<div class="card">
+  <h1>Attach a file</h1>
+  <div class="uuid">Record: ${ticket.metadataUuid}</div>
+  <label class="drop" id="drop">
+    <input type="file" id="file">
+    <div><strong>Click to choose</strong> or drag a file here</div>
+  </label>
+  <div class="file" id="fileName"></div>
+  <button id="btn" disabled>Attach to record</button>
+  <div class="status" id="status"></div>
+</div>
+<script>
+  const TOKEN = ${JSON.stringify(token)};
+  const drop = document.getElementById('drop');
+  const input = document.getElementById('file');
+  const btn = document.getElementById('btn');
+  const fileName = document.getElementById('fileName');
+  const status = document.getElementById('status');
+  let chosen = null;
+
+  function setFile(f){ chosen = f; fileName.textContent = f ? (f.name + ' (' + (f.size/1024).toFixed(0) + ' KB)') : ''; btn.disabled = !f; }
+  input.addEventListener('change', () => setFile(input.files[0]));
+  ['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', ev => { if (ev.dataTransfer.files[0]) setFile(ev.dataTransfer.files[0]); });
+
+  btn.addEventListener('click', async () => {
+    if (!chosen) return;
+    btn.disabled = true;
+    status.className = 'status busy'; status.textContent = 'Uploading…';
+    const fd = new FormData(); fd.append('file', chosen);
+    try {
+      const resp = await fetch('/attach?token=' + encodeURIComponent(TOKEN), { method: 'POST', body: fd });
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        status.className = 'status ok'; status.textContent = '✓ ' + (data.message || 'Attached');
+        setFile(null); input.value = '';
+      } else {
+        status.className = 'status err'; status.textContent = 'Error: ' + (data.error || resp.statusText);
+        btn.disabled = false;
+      }
+    } catch (e) {
+      status.className = 'status err'; status.textContent = 'Request failed: ' + e.message;
+      btn.disabled = false;
+    }
+  });
+</script>
+</body></html>`);
+    });
+
+    // Receives the file from the /attach page and pushes it straight to
+    // GeoNetwork. The buffer lives only in memory — nothing is written to disk.
+    this.app.post("/attach", attachUpload.single("file"), async (req, res) => {
+      const token = pickHeaderValue(req.query.token as string | string[] | undefined);
+      const ticket = getValidTicket(token);
+
+      if (!ticket) {
+        return res.status(403).json({ error: "Upload link expired or invalid" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      try {
+        const filename = req.file.originalname;
+        const contentType = req.file.mimetype || "application/octet-stream";
+        console.log(`[Attach] ${filename} (${req.file.size} bytes) -> record ${ticket.metadataUuid}`);
+
+        const resource = await this.handlers.attachBufferToRecord(
+          ticket.metadataUuid,
+          req.file.buffer,
+          filename,
+          contentType,
+          ticket.visibility,
+          ticket.approved
+        );
+
+        res.json({
+          success: true,
+          message: `"${filename}" attached to record ${ticket.metadataUuid}`,
+          resource,
+        });
+      } catch (error: any) {
+        const errorData = error.response?.data;
+        const errorStatus = error.response?.status;
+        console.error(`[Attach Error] status=${errorStatus}`, errorData || error.message);
+        if (errorStatus === 500 && errorData?.message === "Access Denied") {
+          return res.status(403).json({
+            error: "Access Denied — the record may be published/approved or you lack edit permissions. Try duplicating it to a draft first.",
+          });
+        }
+        res.status(500).json({ error: error.message });
+      }
+    });
+
     // MCP HTTP handler helper
     // A new Server instance is created per request because the MCP SDK only
     // allows one active transport connection per Server instance (stateless mode).
@@ -493,6 +701,46 @@ class GeoNetworkMcpServer {
     console.log(`[Tool] ${name}`, args);
 
     try {
+      // Handled here (not in ToolHandlers) because it depends on the HTTP
+      // server's public URL and the in-memory ticket store, not the GeoNetwork API.
+      if (name === "create_upload_link") {
+        if (!CONFIG.CATALOGUE_USERNAME || !CONFIG.CATALOGUE_PASSWORD) {
+          return {
+            content: [{ type: "text", text: "Error: Authentication required for create_upload_link. Set CATALOGUE_USERNAME and CATALOGUE_PASSWORD." }],
+            isError: true,
+          };
+        }
+        const metadataUuid = String(args?.metadataUuid || "");
+        if (!metadataUuid) {
+          return {
+            content: [{ type: "text", text: "Error: metadataUuid is required." }],
+            isError: true,
+          };
+        }
+        const visibility = args?.visibility === "PRIVATE" ? "PRIVATE" : "PUBLIC";
+        const approved = args?.approved === true;
+        const expiresInMinutes =
+          typeof args?.expiresInMinutes === "number" && args.expiresInMinutes > 0
+            ? args.expiresInMinutes
+            : 30;
+
+        const { token, expiresAt } = createUploadTicket(metadataUuid, visibility, approved, expiresInMinutes);
+        const url = buildAbsoluteUrl(undefined, `/attach?token=${token}`);
+
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `Upload link ready for record ${metadataUuid}:`,
+              url,
+              ``,
+              `Open it in a browser, drag in the file, and it will be attached directly to the record.`,
+              `The link is valid until ${new Date(expiresAt).toISOString()} (${expiresInMinutes} min).`,
+            ].join("\n"),
+          }],
+        };
+      }
+
       const toolHandlers: Record<string, () => Promise<any>> = {
         search_records: () => this.handlers.searchRecords(args),
         get_record: () => this.handlers.getRecord(args),

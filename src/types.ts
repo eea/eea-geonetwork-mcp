@@ -126,6 +126,13 @@ export interface UploadBase64ToRecordArgs {
   approved?: boolean;
 }
 
+export interface CreateUploadLinkArgs {
+  metadataUuid: string;
+  visibility?: "PUBLIC" | "PRIVATE";
+  approved?: boolean;
+  expiresInMinutes?: number;
+}
+
 export interface HandlerConfig {
   maxSearchResults: number;
   username: string;

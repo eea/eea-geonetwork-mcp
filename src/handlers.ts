@@ -1163,4 +1163,50 @@ export class ToolHandlers {
       throw error;
     }
   }
+
+  /**
+   * Shared core for attaching a file to a record: POSTs a buffer to the
+   * GeoNetwork attachments endpoint with session cookie + XSRF + Basic auth
+   * (Basic is required to clear the Apache LDAP layer).
+   * Used by the /attach upload page; returns the raw GeoNetwork resource data
+   * or throws on failure.
+   */
+  async attachBufferToRecord(
+    metadataUuid: string,
+    fileBuffer: Buffer,
+    filename: string,
+    contentType: string,
+    visibility: "PUBLIC" | "PRIVATE" = "PUBLIC",
+    approved = false
+  ): Promise<any> {
+    if (!this.hasCredentials()) {
+      throw new Error("Authentication credentials are not configured.");
+    }
+
+    const { cookieHeader, xsrfToken } = await this.getAuthenticatedSession();
+    const baseURL = this.axiosInstance.defaults.baseURL || "";
+
+    const formData = new FormData();
+    formData.append("file", fileBuffer, { filename, contentType });
+    const formHeaders = formData.getHeaders();
+
+    const response = await axios.post(
+      `${baseURL}/records/${metadataUuid}/attachments`,
+      formData,
+      {
+        params: { visibility, approved },
+        headers: {
+          ...formHeaders,
+          Cookie: cookieHeader,
+          "X-XSRF-TOKEN": xsrfToken || "",
+          Accept: "application/json",
+          Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`,
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      }
+    );
+
+    return response.data;
+  }
 }

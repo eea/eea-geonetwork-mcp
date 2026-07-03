@@ -133,6 +133,12 @@ export interface CreateUploadLinkArgs {
   expiresInMinutes?: number;
 }
 
+export interface ProcessRecordArgs {
+  metadataUuid: string;
+  process: string;
+  params?: Record<string, string>;
+}
+
 export interface HandlerConfig {
   maxSearchResults: number;
   username: string;

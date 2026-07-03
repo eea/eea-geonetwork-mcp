@@ -765,6 +765,7 @@ input[type=file]{display:none}
         upload_file_to_record: () => this.handlers.uploadFileToRecord(args),
         upload_base64_to_record: () => this.handlers.uploadBase64ToRecord(args),
         upload_url_to_record: () => this.handlers.uploadUrlToRecord(args),
+        process_record: () => this.handlers.processRecord(args),
       };
 
       const handler = toolHandlers[name];

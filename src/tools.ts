@@ -491,6 +491,29 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "process_record",
+    description: "Apply an XSL process/transformation to a metadata record (e.g. add-extent-from-geokeywords, add-topic-category, scale-denominator). Requires authentication.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        metadataUuid: {
+          type: "string",
+          description: "The UUID of the metadata record to process",
+        },
+        process: {
+          type: "string",
+          description: "Name of the process/transformation to apply (e.g. 'add-extent-from-geokeywords', 'add-topic-category', 'scale-denominator')",
+        },
+        params: {
+          type: "object",
+          description: "Optional key-value parameters passed to the XSL process (process-specific)",
+          additionalProperties: { type: "string" },
+        },
+      },
+      required: ["metadataUuid", "process"],
+    },
+  },
+  {
     name: "create_upload_link",
     description:
       "Create a one-screen upload link for attaching a local file to a metadata record. " +

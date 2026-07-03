@@ -23,6 +23,7 @@ import {
   UploadFileToRecordArgs,
   UploadUrlToRecordArgs,
   UploadBase64ToRecordArgs,
+  ProcessRecordArgs,
   ToolResponse,
   HandlerConfig,
 } from "./types.js";
@@ -1160,6 +1161,46 @@ export class ToolHandlers {
         };
       }
 
+      throw error;
+    }
+  }
+
+  async processRecord(args: ProcessRecordArgs): Promise<ToolResponse> {
+    if (!this.hasCredentials()) {
+      return this.authRequiredResponse("process_record");
+    }
+
+    const { metadataUuid, process, params = {} } = args;
+
+    console.log(`[ProcessRecord] UUID: ${metadataUuid}, Process: ${process}, Params:`, params);
+
+    const { cookieHeader } = await this.getAuthenticatedSession();
+    const baseURL = this.axiosInstance.defaults.baseURL || "";
+    const basicAuth = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
+
+    try {
+      const response = await axios.post(
+        `${baseURL}/records/${metadataUuid}/processes/${process}`,
+        null,
+        {
+          params,
+          headers: {
+            Cookie: cookieHeader,
+            Authorization: basicAuth,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      console.log(`[ProcessRecord] Response:`, response.status);
+
+      return this.formatResponse({
+        success: true,
+        message: `Process "${process}" applied to record ${metadataUuid}`,
+        details: response.data,
+      });
+    } catch (error: any) {
+      console.log(`[ProcessRecord] Error:`, error.response?.data);
       throw error;
     }
   }

@@ -1,11 +1,11 @@
 # Build stage
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 # Upgrade OS packages to pick up security patches (e.g. gnutls28 CVE fix)
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 # Upgrade npm to fix CVE in bundled tar (<=7.5.3)
-RUN npm install -g npm@latest
+RUN npm install -g npm@11
 
 WORKDIR /app
 
@@ -22,13 +22,13 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:20-slim
+FROM node:22-slim
 
 # Upgrade OS packages to pick up security patches (e.g. gnutls28 CVE fix)
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 # Upgrade npm to fix CVE in bundled tar (<=7.5.3)
-RUN npm install -g npm@latest
+RUN npm install -g npm@11
 
 WORKDIR /app
 

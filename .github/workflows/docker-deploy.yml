@@ -1,0 +1,44 @@
+name: Docker Deploy
+
+on:
+  workflow_run:
+    workflows: ["Docker Publish"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-eeadh:
+    runs-on: self-hosted
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      packages: read
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull latest image
+        run: docker pull ghcr.io/${{ github.repository }}:latest
+
+      - name: Restart container
+        run: |
+          docker network create app-net || true
+          docker rm -f eea-geonetwork-mcp || true
+          docker run -d --network app-net -p 127.0.0.1:3001:3001 \
+            --env-file ~/ENV_FILES/geonetwork-mcp.env \
+            -e NODE_ENV=production \
+            -e UPLOAD_DIR=/app/uploads \
+            -v eea_geonetwork_uploads:/app/uploads \
+            --restart unless-stopped \
+            --name eea-geonetwork-mcp \
+            ghcr.io/${{ github.repository }}:latest
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 15); do
+            if curl -fsS http://127.0.0.1:3001/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs --tail 50 eea-geonetwork-mcp
+          exit 1

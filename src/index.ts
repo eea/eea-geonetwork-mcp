@@ -595,7 +595,7 @@ input[type=file]{display:none}
     status.className = 'status busy'; status.textContent = 'Uploading…';
     const fd = new FormData(); fd.append('file', chosen);
     try {
-      const resp = await fetch('/attach?token=' + encodeURIComponent(TOKEN), { method: 'POST', body: fd });
+      const resp = await fetch('attach?token=' + encodeURIComponent(TOKEN), { method: 'POST', body: fd });
       const data = await resp.json();
       if (resp.ok && data.success) {
         status.className = 'status ok'; status.textContent = '✓ ' + (data.message || 'Attached');
